@@ -1,0 +1,130 @@
+name: client-windows-installer
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_reason:
+        description: "构建说明（可选）"
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "client/**"
+      - ".github/workflows/client-windows-installer.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: client-windows-installer-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-windows-installer:
+    runs-on: windows-latest
+    env:
+      TARGET_TRIPLE: x86_64-pc-windows-msvc
+    defaults:
+      run:
+        working-directory: client
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ env.TARGET_TRIPLE }}
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            client/src-tauri -> target
+
+      - name: Install frontend deps
+        run: npm ci
+
+      - name: Build NSIS installer
+        run: npm run tauri:build:win:nsis
+
+      - name: Verify NSIS package and generate checksum
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $nsisDir = "src-tauri/target/$env:TARGET_TRIPLE/release/bundle/nsis"
+          if (!(Test-Path $nsisDir)) {
+            throw "NSIS output directory not found at $nsisDir"
+          }
+
+          $installer = Get-ChildItem -Path $nsisDir -Filter *.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($null -eq $installer) {
+            throw "No NSIS installer found under $nsisDir"
+          }
+
+          $hash = (Get-FileHash $installer.FullName -Algorithm SHA256).Hash.ToLower()
+          "$hash  $($installer.Name)" | Out-File "$($installer.FullName).sha256" -Encoding ascii
+
+      - name: Prepare portable package
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $exe = "src-tauri/target/$env:TARGET_TRIPLE/release/app.exe"
+          if (!(Test-Path $exe)) {
+            throw "app.exe not found at $exe"
+          }
+
+          $outDir = "dist-windows"
+          New-Item -ItemType Directory -Path $outDir -Force | Out-Null
+
+          Copy-Item $exe "$outDir/app.exe" -Force
+
+          $webview = "src-tauri/target/$env:TARGET_TRIPLE/release/WebView2Loader.dll"
+          if (Test-Path $webview) {
+            Copy-Item $webview "$outDir/WebView2Loader.dll" -Force
+          }
+
+          $zipPath = "$outDir/jxc-windows-x64-portable.zip"
+          if (Test-Path $zipPath) {
+            Remove-Item $zipPath -Force
+          }
+
+          $include = @("$outDir/app.exe")
+          if (Test-Path "$outDir/WebView2Loader.dll") {
+            $include += "$outDir/WebView2Loader.dll"
+          }
+
+          Compress-Archive -Path $include -DestinationPath $zipPath -CompressionLevel Optimal
+
+          $hash = (Get-FileHash $zipPath -Algorithm SHA256).Hash.ToLower()
+          "$hash  jxc-windows-x64-portable.zip" | Out-File "$outDir/jxc-windows-x64-portable.zip.sha256" -Encoding ascii
+
+      - name: Upload NSIS artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jxc-windows-nsis
+          path: |
+            client/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe
+            client/src-tauri/target/x86_64-pc-windows-msvc/release/bundle/nsis/*.exe.sha256
+          if-no-files-found: error
+
+      - name: Upload portable artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jxc-windows-portable
+          path: |
+            client/dist-windows/app.exe
+            client/dist-windows/WebView2Loader.dll
+            client/dist-windows/jxc-windows-x64-portable.zip
+            client/dist-windows/jxc-windows-x64-portable.zip.sha256

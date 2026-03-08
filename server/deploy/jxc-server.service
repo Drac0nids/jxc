@@ -1,0 +1,22 @@
+[Unit]
+Description=JXC Server (Rust + Axum)
+After=network.target
+Wants=network.target
+
+[Service]
+Type=simple
+User=ubuntu
+Group=ubuntu
+WorkingDirectory=/projects/jxcServer
+Environment=RUST_LOG=info
+EnvironmentFile=/projects/jxcServer/.env
+ExecStart=/projects/jxcServer/target/release/server
+Restart=always
+RestartSec=3
+TimeoutStartSec=30
+LimitNOFILE=65535
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

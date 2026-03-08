@@ -1,0 +1,1497 @@
+openapi: 3.0.3
+info:
+  title: JXC Server API
+  description: |
+    极速云进销存（JXC）服务端 OpenAPI 3.0 初版。
+
+    - 统一响应：`code/message/data/request_id`
+    - 鉴权：`Authorization: Bearer <access_token>`
+    - 写接口幂等：`X-Idempotency-Key`
+    - 金额字段：字符串传输
+  version: 1.1.0
+servers:
+  - url: http://127.0.0.1:8080
+    description: Local Development
+tags:
+  - name: System
+  - name: Auth
+  - name: Products
+  - name: Inventory
+  - name: PurchaseOrders
+  - name: SalesOrders
+  - name: StockChecks
+  - name: Reports
+  - name: Audit
+  - name: Users
+
+paths:
+  /health:
+    get:
+      tags: [System]
+      summary: 健康检查
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: '#/components/responses/HealthSuccess'
+        '500':
+          $ref: '#/components/responses/InternalError'
+
+  /api/v1/auth/register:
+    post:
+      tags: [Auth]
+      summary: 租户注册
+      description: 注册成功后创建 tenant_id 与 OWNER 账号，并返回登录态 token。
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RegisterRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/auth/login:
+    post:
+      tags: [Auth]
+      summary: 用户登录
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/LoginRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: 刷新 Access Token
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/RefreshTokenRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/auth/logout:
+    post:
+      tags: [Auth]
+      summary: 退出登录
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/users:
+    get:
+      tags: [Users]
+      summary: 员工列表（仅 OWNER）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+    post:
+      tags: [Users]
+      summary: 新增员工（仅 OWNER）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserCreateRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/users/{id}/role:
+    patch:
+      tags: [Users]
+      summary: 修改员工角色（仅 OWNER）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserUpdateRoleRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/users/{id}/reset-password:
+    post:
+      tags: [Users]
+      summary: 重置员工密码（仅 OWNER）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: id
+          in: path
+          required: true
+          schema:
+            type: string
+            format: uuid
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UserResetPasswordRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/inventory/logs:
+    get:
+      tags: [Inventory]
+      summary: 查询库存流水列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: biz_type
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: biz_no
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: product_id
+          in: query
+          required: false
+          schema:
+            type: integer
+            format: int64
+        - name: operator_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/products/scan:
+    get:
+      tags: [Products]
+      summary: 扫码查询商品
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: barcode
+          in: query
+          required: true
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/products:
+    get:
+      tags: [Products]
+      summary: 商品列表
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: keyword
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: barcode
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+    post:
+      tags: [Products]
+      summary: 新建商品
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductCreateRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/products/{id}:
+    get:
+      tags: [Products]
+      summary: 商品详情
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+    put:
+      tags: [Products]
+      summary: 更新商品
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+        - $ref: '#/components/parameters/PathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/ProductUpdateRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+    delete:
+      tags: [Products]
+      summary: 删除商品（软删除）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+        - $ref: '#/components/parameters/PathId'
+        - $ref: '#/components/parameters/ExpectedVersionQuery'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/purchase-orders:
+    post:
+      tags: [PurchaseOrders]
+      summary: 创建采购单
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/PurchaseOrderCreateRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/purchase-orders/{id}:
+    get:
+      tags: [PurchaseOrders]
+      summary: 查询采购单
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/purchase-orders/{id}/confirm:
+    post:
+      tags: [PurchaseOrders]
+      summary: 确认采购单
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+        - $ref: '#/components/parameters/PathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderActionRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/purchase-orders/{id}/void:
+    post:
+      tags: [PurchaseOrders]
+      summary: 作废采购单
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+        - $ref: '#/components/parameters/PathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderActionRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/sales-orders:
+    post:
+      tags: [SalesOrders]
+      summary: 创建销售单
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SalesOrderCreateRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/sales-orders/{id}:
+    get:
+      tags: [SalesOrders]
+      summary: 查询销售单
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/sales-orders/{id}/confirm:
+    post:
+      tags: [SalesOrders]
+      summary: 确认销售单
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+        - $ref: '#/components/parameters/PathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderActionRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/sales-orders/{id}/void:
+    post:
+      tags: [SalesOrders]
+      summary: 作废销售单（仅草稿）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+        - $ref: '#/components/parameters/PathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderActionRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/sales-orders/{id}/return:
+    post:
+      tags: [SalesOrders]
+      summary: 销售退货
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+        - $ref: '#/components/parameters/PathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/SalesOrderReturnRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/inventory/stock-checks:
+    post:
+      tags: [StockChecks]
+      summary: 创建盘点单
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockCheckCreateRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/inventory/stock-checks/{id}:
+    get:
+      tags: [StockChecks]
+      summary: 查询盘点单
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/PathId'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+
+  /api/v1/inventory/stock-checks/{id}/start:
+    post:
+      tags: [StockChecks]
+      summary: 开始盘点
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+        - $ref: '#/components/parameters/PathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OrderActionRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/inventory/stock-checks/{id}/confirm:
+    post:
+      tags: [StockChecks]
+      summary: 确认盘点
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+        - $ref: '#/components/parameters/PathId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/StockCheckConfirmRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/inventory/inbound:
+    post:
+      tags: [Inventory]
+      summary: 采购入库
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InboundRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/inventory/outbound:
+    post:
+      tags: [Inventory]
+      summary: 销售出库
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/OutboundRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
+  /api/v1/inventory/alerts/low-stock:
+    get:
+      tags: [Inventory]
+      summary: 低库存预警
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: keyword
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: only_active
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: true
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/reports/dashboard:
+    get:
+      tags: [Reports]
+      summary: 经营看板
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+            example: '2026-03-03'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/reports/sales:
+    get:
+      tags: [Reports]
+      summary: 销售报表
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: group_by
+          in: query
+          required: false
+          schema:
+            type: string
+            default: product
+            enum: [product]
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/reports/sales/export:
+    get:
+      tags: [Reports]
+      summary: 导出销售报表（CSV/XLSX）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: group_by
+          in: query
+          required: false
+          schema:
+            type: string
+            default: product
+            enum: [product]
+        - name: format
+          in: query
+          required: false
+          schema:
+            type: string
+            default: csv
+            enum: [csv, xlsx]
+      responses:
+        '200':
+          $ref: '#/components/responses/ExportFileSuccess'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+  /api/v1/audit/logs:
+    get:
+      tags: [Audit]
+      summary: 审计日志查询（仅 OWNER）
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+        - name: action
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: target_type
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: operator_id
+          in: query
+          required: false
+          schema:
+            type: string
+            format: uuid
+        - name: request_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+
+  parameters:
+    XRequestId:
+      name: x-request-id
+      in: header
+      required: false
+      schema:
+        type: string
+      description: 请求链路 ID（可选，不传则服务端自动生成）
+
+    XIdempotencyKey:
+      name: X-Idempotency-Key
+      in: header
+      required: true
+      schema:
+        type: string
+      description: 写接口幂等键（必填）
+
+    PathId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: integer
+        format: int64
+
+    Page:
+      name: page
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        default: 1
+
+    PageSize:
+      name: page_size
+      in: query
+      required: false
+      schema:
+        type: integer
+        minimum: 1
+        maximum: 100
+        default: 20
+
+    ExpectedVersionQuery:
+      name: expected_version
+      in: query
+      required: false
+      schema:
+        type: integer
+
+  headers:
+    XRequestIdHeader:
+      description: 服务端返回的请求链路 ID
+      schema:
+        type: string
+    XIdempotentReplayHeader:
+      description: 幂等重放标识（true 表示重放）
+      schema:
+        type: string
+
+  responses:
+    HealthSuccess:
+      description: 健康检查成功
+      headers:
+        x-request-id:
+          $ref: '#/components/headers/XRequestIdHeader'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiSuccess'
+          example:
+            code: 200
+            message: success
+            data:
+              status: ok
+              service: jxc-server
+            request_id: req_20260303_demo
+
+    SuccessJson:
+      description: 业务成功
+      headers:
+        x-request-id:
+          $ref: '#/components/headers/XRequestIdHeader'
+        x-idempotent-replay:
+          $ref: '#/components/headers/XIdempotentReplayHeader'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiSuccess'
+
+    ExportFileSuccess:
+      description: 导出成功，返回文件流
+      headers:
+        x-request-id:
+          $ref: '#/components/headers/XRequestIdHeader'
+        Content-Disposition:
+          schema:
+            type: string
+          description: 附件文件名（sales_report_<start>_<end>.csv/xlsx）
+      content:
+        text/csv:
+          schema:
+            type: string
+            format: binary
+        application/vnd.openxmlformats-officedocument.spreadsheetml.sheet:
+          schema:
+            type: string
+            format: binary
+
+    BadRequest:
+      description: 参数错误（业务码常见 4000）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    Unauthorized:
+      description: 未登录或 Token 无效（业务码常见 4010）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    Forbidden:
+      description: 无权限（业务码常见 4030）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    NotFound:
+      description: 资源不存在（业务码常见 4040）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    Conflict:
+      description: 冲突（业务码常见 4090/4091/4092）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+    InternalError:
+      description: 服务器内部错误（业务码常见 5000）
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiError'
+
+  schemas:
+    ApiSuccess:
+      type: object
+      required: [code, message, data, request_id]
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          type: object
+          additionalProperties: true
+          description: 不同接口返回结构不同
+        request_id:
+          type: string
+          example: req_20260303_xxx
+
+    ApiError:
+      type: object
+      required: [code, message, request_id]
+      properties:
+        code:
+          type: integer
+          example: 4000
+        message:
+          type: string
+          example: 参数错误
+        data:
+          type: object
+          nullable: true
+          additionalProperties: true
+        request_id:
+          type: string
+          example: req_20260303_xxx
+
+    RegisterRequest:
+      type: object
+      required: [username, name, password]
+      properties:
+        tenant_name:
+          type: string
+          nullable: true
+          description: 租户名称，可选
+        username:
+          type: string
+        name:
+          type: string
+        password:
+          type: string
+
+    LoginRequest:
+      type: object
+      required: [username, password]
+      properties:
+        username:
+          type: string
+        password:
+          type: string
+
+    UserCreateRequest:
+      type: object
+      required: [username, name, role, password]
+      properties:
+        username:
+          type: string
+        name:
+          type: string
+        role:
+          type: string
+          enum: [OWNER, PURCHASER, SALES]
+        password:
+          type: string
+
+    UserUpdateRoleRequest:
+      type: object
+      required: [role]
+      properties:
+        role:
+          type: string
+          enum: [OWNER, PURCHASER, SALES]
+
+    UserResetPasswordRequest:
+      type: object
+      required: [new_password]
+      properties:
+        new_password:
+          type: string
+
+    RefreshTokenRequest:
+      type: object
+      required: [refresh_token]
+      properties:
+        refresh_token:
+          type: string
+
+    ProductCreateRequest:
+      type: object
+      required: [barcode, name, unit, retail_price, wholesale_price]
+      properties:
+        sku:
+          type: string
+        barcode:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        retail_price:
+          type: string
+        wholesale_price:
+          type: string
+        init_stock:
+          type: integer
+          minimum: 0
+        min_stock_limit:
+          type: integer
+          minimum: 0
+        cost_price:
+          type: string
+
+    ProductUpdateRequest:
+      type: object
+      properties:
+        sku:
+          type: string
+        barcode:
+          type: string
+        name:
+          type: string
+        unit:
+          type: string
+        retail_price:
+          type: string
+        wholesale_price:
+          type: string
+        min_stock_limit:
+          type: integer
+          minimum: 0
+        expected_version:
+          type: integer
+
+    PurchaseOrderCreateItemRequest:
+      type: object
+      required: [product_id, qty, unit_cost]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        qty:
+          type: integer
+          minimum: 1
+        unit_cost:
+          type: string
+
+    PurchaseOrderCreateRequest:
+      type: object
+      required: [biz_no, items]
+      properties:
+        biz_no:
+          type: string
+        supplier_id:
+          type: integer
+          format: int64
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/PurchaseOrderCreateItemRequest'
+        remark:
+          type: string
+
+    OrderActionRequest:
+      type: object
+      properties:
+        expected_version:
+          type: integer
+
+    SalesOrderCreateItemRequest:
+      type: object
+      required: [product_id, qty, sell_price]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        qty:
+          type: integer
+          minimum: 1
+        sell_price:
+          type: string
+
+    SalesOrderCreateRequest:
+      type: object
+      required: [biz_no, items]
+      properties:
+        biz_no:
+          type: string
+        customer_id:
+          type: integer
+          format: int64
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SalesOrderCreateItemRequest'
+        remark:
+          type: string
+
+    SalesOrderReturnItemRequest:
+      type: object
+      required: [product_id, qty]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        qty:
+          type: integer
+          minimum: 1
+
+    SalesOrderReturnRequest:
+      type: object
+      required: [items]
+      properties:
+        expected_version:
+          type: integer
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/SalesOrderReturnItemRequest'
+        remark:
+          type: string
+
+    StockCheckCreateItemRequest:
+      type: object
+      required: [product_id]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+
+    StockCheckCreateRequest:
+      type: object
+      required: [biz_no, items]
+      properties:
+        biz_no:
+          type: string
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/StockCheckCreateItemRequest'
+        remark:
+          type: string
+
+    StockCheckConfirmItemRequest:
+      type: object
+      required: [product_id, actual_stock]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        actual_stock:
+          type: integer
+          minimum: 0
+
+    StockCheckConfirmRequest:
+      type: object
+      required: [items]
+      properties:
+        expected_version:
+          type: integer
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/StockCheckConfirmItemRequest'
+        remark:
+          type: string
+
+    InboundRequest:
+      type: object
+      required: [qty, unit_cost, biz_no]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        barcode:
+          type: string
+        qty:
+          type: integer
+          minimum: 1
+        unit_cost:
+          type: string
+        expected_version:
+          type: integer
+        biz_no:
+          type: string
+        remark:
+          type: string
+      anyOf:
+        - required: [product_id]
+        - required: [barcode]
+
+    OutboundItemRequest:
+      type: object
+      required: [product_id, qty, sell_price]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        qty:
+          type: integer
+          minimum: 1
+        sell_price:
+          type: string
+        expected_version:
+          type: integer
+
+    OutboundRequest:
+      type: object
+      required: [biz_no, items]
+      properties:
+        biz_no:
+          type: string
+        customer_id:
+          type: integer
+          format: int64
+        expected_version:
+          type: integer
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/OutboundItemRequest'
+        remark:
+          type: string

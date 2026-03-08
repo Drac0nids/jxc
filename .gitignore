@@ -1,0 +1,29 @@
+# macOS
+.DS_Store
+
+# IDE / Editor
+.vscode/
+.idea/
+
+# Logs
+*.log
+
+# Local env files
+server/.env
+**/.env.local
+**/.env.*.local
+
+# Rust / Tauri build outputs
+server/target/
+client/src-tauri/target/
+.cross-bin/
+
+# Frontend build outputs
+client/node_modules/
+client/dist/
+client/dist-windows/
+
+# Flutter build outputs
+app/.dart_tool/
+app/.pub-cache/
+app/build/

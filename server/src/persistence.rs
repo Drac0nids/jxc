@@ -1,0 +1,91 @@
+use redis::Client as RedisClient;
+use sqlx::{PgPool, postgres::PgPoolOptions, raw_sql};
+use tracing::{info, warn};
+
+use crate::{
+    config::{AppConfig, StorageBackend},
+    error::AppError,
+};
+
+#[derive(Debug, Clone)]
+pub struct PersistenceHandles {
+    pub backend: StorageBackend,
+    pub postgres: Option<PgPool>,
+    pub redis: Option<RedisClient>,
+}
+
+impl PersistenceHandles {
+    pub fn memory() -> Self {
+        Self {
+            backend: StorageBackend::Memory,
+            postgres: None,
+            redis: None,
+        }
+    }
+}
+
+pub async fn initialize_persistence(config: &AppConfig) -> Result<PersistenceHandles, AppError> {
+    let mut handles = PersistenceHandles {
+        backend: config.storage_backend,
+        postgres: None,
+        redis: None,
+    };
+
+    if matches!(config.storage_backend, StorageBackend::Postgres) {
+        let database_url = config.database_url.as_deref().ok_or_else(|| {
+            AppError::internal("STORAGE_BACKEND=postgres 时必须配置 DATABASE_URL")
+        })?;
+
+        let pool = PgPoolOptions::new()
+            .max_connections(config.postgres_max_connections)
+            .connect(database_url)
+            .await
+            .map_err(|err| AppError::internal(format!("初始化 PostgreSQL 连接池失败: {err}")))?;
+
+        apply_postgres_migrations(&pool).await?;
+
+        handles.postgres = Some(pool);
+    }
+
+    if let Some(redis_url) = config.redis_url.as_deref() {
+        let redis_client = RedisClient::open(redis_url)
+            .map_err(|err| AppError::internal(format!("初始化 Redis 客户端失败: {err}")))?;
+        handles.redis = Some(redis_client);
+    } else if matches!(config.storage_backend, StorageBackend::Postgres) {
+        warn!("STORAGE_BACKEND=postgres 但 REDIS_URL 未配置，将继续使用内存态幂等缓存");
+    }
+
+    info!(
+        storage_backend = config.storage_backend.as_str(),
+        backend = handles.backend.as_str(),
+        postgres_enabled = handles.postgres.is_some(),
+        redis_enabled = handles.redis.is_some(),
+        "persistence bootstrap completed"
+    );
+
+    Ok(handles)
+}
+
+async fn apply_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
+    let migrations = [
+        ("0001_init", include_str!("../migrations/0001_init.sql")),
+        (
+            "0002_core_tables",
+            include_str!("../migrations/0002_core_tables.sql"),
+        ),
+        (
+            "0003_business_tables",
+            include_str!("../migrations/0003_business_tables.sql"),
+        ),
+    ];
+
+    for (name, sql) in migrations {
+        raw_sql(sql)
+            .execute(pool)
+            .await
+            .map_err(|err| AppError::internal(format!("执行迁移 {name} 失败: {err}")))?;
+    }
+
+    info!("postgres migrations applied");
+    Ok(())
+}

@@ -1,0 +1,412 @@
+:root {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+  line-height: 1.5;
+  font-weight: 400;
+  color: #1f2937;
+  background: #f3f4f6;
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  min-width: 320px;
+  min-height: 100vh;
+}
+
+#app {
+  width: 100%;
+  min-height: 100vh;
+}
+
+h1,
+h2,
+h3,
+p {
+  margin: 0;
+}
+
+h2 {
+  margin-bottom: 16px;
+  font-size: 22px;
+}
+
+h3 {
+  font-size: 16px;
+}
+
+input,
+button {
+  font: inherit;
+}
+
+input {
+  width: 100%;
+  border: 1px solid #d1d5db;
+  border-radius: 8px;
+  padding: 8px 10px;
+  outline: none;
+  background: #fff;
+}
+
+input:focus {
+  border-color: #2563eb;
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.15);
+}
+
+.btn {
+  border: 1px solid #2563eb;
+  border-radius: 8px;
+  background: #2563eb;
+  color: #fff;
+  padding: 8px 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn:hover:not(:disabled) {
+  background: #1d4ed8;
+  border-color: #1d4ed8;
+}
+
+.btn:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.btn.btn-secondary {
+  background: #fff;
+  color: #1f2937;
+  border-color: #d1d5db;
+}
+
+.btn.btn-secondary:hover:not(:disabled) {
+  background: #f9fafb;
+  border-color: #9ca3af;
+}
+
+.btn.btn-danger {
+  background: #ef4444;
+  border-color: #ef4444;
+}
+
+.btn.btn-danger:hover:not(:disabled) {
+  background: #dc2626;
+  border-color: #dc2626;
+}
+
+.layout-shell {
+  display: grid;
+  grid-template-columns: 220px 1fr;
+  min-height: 100vh;
+}
+
+.layout-sidebar {
+  background: #111827;
+  color: #e5e7eb;
+  padding: 20px 16px;
+}
+
+.layout-title {
+  font-size: 20px;
+  margin-bottom: 6px;
+}
+
+.layout-subtitle {
+  font-size: 12px;
+  color: #9ca3af;
+  margin-bottom: 20px;
+}
+
+.layout-nav {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.layout-nav-link {
+  display: block;
+  text-decoration: none;
+  color: #d1d5db;
+  border-radius: 8px;
+  padding: 8px 10px;
+  transition: all 0.2s ease;
+}
+
+.layout-nav-link:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+.layout-nav-link.is-active {
+  background: #2563eb;
+  color: #fff;
+}
+
+.layout-main {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.layout-header {
+  height: 64px;
+  background: #fff;
+  border-bottom: 1px solid #e5e7eb;
+  padding: 0 20px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.layout-user {
+  font-size: 14px;
+  color: #4b5563;
+}
+
+.layout-content {
+  padding: 20px;
+}
+
+.layout-content > section,
+.result-panel,
+.card-panel,
+.login-card {
+  background: #fff;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
+}
+
+.layout-content > section {
+  padding: 16px;
+}
+
+.login-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.login-card {
+  width: 420px;
+  max-width: 100%;
+  padding: 20px;
+}
+
+.form-tip {
+  margin-top: 6px;
+  margin-bottom: 16px;
+  color: #6b7280;
+  font-size: 13px;
+}
+
+.form-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.form-inline {
+  display: flex;
+  gap: 12px;
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.form-inline.form-inline-compact {
+  margin-bottom: 0;
+}
+
+.form-label {
+  display: grid;
+  gap: 6px;
+}
+
+.form-label span {
+  font-size: 13px;
+  color: #4b5563;
+}
+
+.form-label.inline {
+  min-width: 220px;
+  flex: 1;
+}
+
+.checkbox-inline {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #374151;
+  font-size: 14px;
+}
+
+.checkbox-inline input {
+  width: auto;
+  margin: 0;
+}
+
+.table-summary {
+  margin: 6px 0 12px;
+  color: #6b7280;
+  font-size: 14px;
+}
+
+.table-wrapper {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.data-table th,
+.data-table td {
+  border-bottom: 1px solid #e5e7eb;
+  padding: 10px;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.data-table th {
+  font-weight: 600;
+  color: #374151;
+  background: #f9fafb;
+}
+
+.data-table.data-table-compact th,
+.data-table.data-table-compact td {
+  padding: 8px;
+}
+
+.table-input {
+  min-width: 96px;
+}
+
+.empty-cell {
+  text-align: center !important;
+  color: #9ca3af;
+}
+
+.warn-text {
+  color: #dc2626;
+  font-weight: 600;
+}
+
+.error-text {
+  margin-top: 4px;
+  color: #dc2626;
+  font-size: 14px;
+}
+
+.success-text {
+  margin-top: 4px;
+  color: #059669;
+  font-size: 14px;
+}
+
+.pager {
+  margin-top: 12px;
+  display: flex;
+  gap: 10px;
+}
+
+.card-panel {
+  padding: 12px;
+}
+
+.card-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 10px;
+}
+
+.form-actions {
+  display: flex;
+  gap: 10px;
+}
+
+.result-panel {
+  margin-top: 14px;
+  padding: 14px;
+  display: grid;
+  gap: 10px;
+}
+
+.dashboard-grid {
+  margin-top: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-summary-grid {
+  margin-bottom: 12px;
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.metric-card {
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+  padding: 14px;
+  background: #fff;
+}
+
+.metric-card.metric-card-wide {
+  grid-column: 1 / -1;
+}
+
+.metric-label {
+  font-size: 13px;
+  color: #6b7280;
+}
+
+.metric-value {
+  margin-top: 8px;
+  font-size: 24px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.2;
+}
+
+@media (max-width: 960px) {
+  .layout-shell {
+    grid-template-columns: 1fr;
+  }
+
+  .layout-sidebar {
+    padding-bottom: 12px;
+  }
+
+  .layout-nav {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+
+  .layout-nav-link {
+    width: auto;
+  }
+
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .report-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .metric-card.metric-card-wide {
+    grid-column: auto;
+  }
+}
