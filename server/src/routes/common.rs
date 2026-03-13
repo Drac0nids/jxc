@@ -1,4 +1,3 @@
-use std::str::FromStr;
 use axum::{
     Json,
     http::{HeaderMap, StatusCode},
@@ -9,14 +8,14 @@ use rust_decimal::{Decimal, prelude::ToPrimitive};
 use rust_xlsxwriter::{Format, FormatAlign, FormatBorder, Workbook};
 use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
+use std::collections::HashMap;
+use std::str::FromStr;
 use uuid::Uuid;
 
 use crate::{
     error::AppError,
-    models::{
-        AuditLog, Product, PurchaseOrder, SalesOrder, StockCheck, User, UserRole,
-    },
-    response::{build_response_headers},
+    models::{AuditLog, Product, PurchaseOrder, SalesOrder, StockCheck, User, UserRole},
+    response::build_response_headers,
     state::AppState,
 };
 
@@ -57,6 +56,20 @@ pub struct ScanQuery {
     pub barcode: String,
 }
 
+#[derive(Debug, Deserialize)]
+pub struct BarcodeLookupQuery {
+    pub barcode: String,
+}
+
+#[derive(Debug, Serialize)]
+pub struct BarcodeLookupData {
+    pub barcode: String,
+    pub status: String,
+    pub suggested_name: Option<String>,
+    pub cache_hit: bool,
+    pub source: String,
+}
+
 #[derive(Debug, Serialize)]
 pub struct ScanProductData {
     pub id: i64,
@@ -77,6 +90,7 @@ pub struct ListProductsQuery {
     pub page_size: Option<u32>,
     pub keyword: Option<String>,
     pub barcode: Option<String>,
+    pub low_stock: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -88,7 +102,7 @@ pub struct ProductData {
     pub unit: String,
     pub current_stock: i32,
     pub retail_price: String,
-    pub wholesale_price: String,
+    pub last_inbound_unit_cost: Option<String>,
     pub cost_price: Option<String>,
     pub min_stock_limit: i32,
     pub version: i32,
@@ -101,10 +115,9 @@ pub struct CreateProductRequest {
     pub name: String,
     pub unit: String,
     pub retail_price: String,
-    pub wholesale_price: String,
     pub init_stock: Option<i32>,
     pub min_stock_limit: Option<i32>,
-    pub cost_price: Option<String>,
+    pub cost_price: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -114,7 +127,6 @@ pub struct UpdateProductRequest {
     pub name: Option<String>,
     pub unit: Option<String>,
     pub retail_price: Option<String>,
-    pub wholesale_price: Option<String>,
     pub min_stock_limit: Option<i32>,
     pub expected_version: Option<i32>,
 }
@@ -151,10 +163,25 @@ pub struct InboundRequest {
     pub product_id: Option<i64>,
     pub barcode: Option<String>,
     pub qty: i32,
-    pub unit_cost: String,
+    pub unit_cost: Option<String>,
     pub expected_version: Option<i32>,
-    pub biz_no: String,
+    pub biz_no: Option<String>,
     pub remark: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InboundBatchItemRequest {
+    pub product_id: Option<i64>,
+    pub barcode: Option<String>,
+    pub qty: i32,
+    pub unit_cost: Option<String>,
+    pub expected_version: Option<i32>,
+    pub remark: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InboundBatchRequest {
+    pub items: Vec<InboundBatchItemRequest>,
 }
 
 #[derive(Debug, Serialize)]
@@ -166,9 +193,23 @@ pub struct InventoryResultData {
     pub version: i32,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub struct InventoryBatchItemResultData {
+    pub product_id: i64,
+    pub current_stock: i32,
+    pub cost_price: String,
+    pub version: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct InventoryBatchResultData {
+    pub biz_no: String,
+    pub items: Vec<InventoryBatchItemResultData>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OutboundRequest {
-    pub biz_no: String,
+    pub biz_no: Option<String>,
     pub customer_id: Option<i64>,
     pub expected_version: Option<i32>,
     pub items: Vec<OutboundItemRequest>,
@@ -209,7 +250,7 @@ pub struct PurchaseOrderCreateItemRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PurchaseOrderCreateRequest {
-    pub biz_no: String,
+    pub biz_no: Option<String>,
     pub supplier_id: Option<i64>,
     pub items: Vec<PurchaseOrderCreateItemRequest>,
     pub remark: Option<String>,
@@ -218,8 +259,10 @@ pub struct PurchaseOrderCreateRequest {
 #[derive(Debug, Serialize)]
 pub struct PurchaseOrderItemData {
     pub product_id: i64,
+    pub product_name: String,
     pub qty: i32,
     pub unit_cost: String,
+    pub line_amount: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -229,6 +272,7 @@ pub struct PurchaseOrderData {
     pub supplier_id: Option<i64>,
     pub status: String,
     pub items: Vec<PurchaseOrderItemData>,
+    pub total_amount: String,
     pub remark: Option<String>,
     pub version: i32,
     pub confirmed_at: Option<String>,
@@ -248,7 +292,7 @@ pub struct SalesOrderCreateItemRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct SalesOrderCreateRequest {
-    pub biz_no: String,
+    pub biz_no: Option<String>,
     pub customer_id: Option<i64>,
     pub items: Vec<SalesOrderCreateItemRequest>,
     pub remark: Option<String>,
@@ -267,15 +311,17 @@ pub struct SalesOrderReturnRequest {
     pub remark: Option<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SalesOrderItemData {
     pub product_id: i64,
+    pub product_name: String,
     pub qty: i32,
     pub sell_price: String,
+    pub line_amount: String,
     pub returned_qty: i32,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 pub struct SalesOrderData {
     pub id: i64,
     pub biz_no: String,
@@ -301,7 +347,7 @@ pub struct StockCheckCreateItemRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct StockCheckCreateRequest {
-    pub biz_no: String,
+    pub biz_no: Option<String>,
     pub items: Vec<StockCheckCreateItemRequest>,
     pub remark: Option<String>,
 }
@@ -349,6 +395,14 @@ pub struct DashboardQuery {
 }
 
 #[derive(Debug, Deserialize)]
+pub struct DashboardOrdersQuery {
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
+    pub page: Option<u32>,
+    pub page_size: Option<u32>,
+}
+
+#[derive(Debug, Deserialize)]
 pub struct SalesReportQuery {
     pub start_date: Option<String>,
     pub end_date: Option<String>,
@@ -363,6 +417,12 @@ pub struct SalesReportExportQuery {
     pub end_date: Option<String>,
     pub group_by: Option<String>,
     pub format: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct TrendQuery {
+    pub start_date: Option<String>,
+    pub end_date: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -432,6 +492,8 @@ pub struct StockLogData {
     pub delta_qty: i32,
     pub snapshot_stock: i32,
     pub snapshot_cost: String,
+    pub snapshot_sell_price: Option<String>,
+    pub snapshot_inbound_unit_cost: Option<String>,
     pub operator_id: String,
     pub created_at: String,
 }
@@ -442,21 +504,65 @@ pub fn postgres_pool_or_none(state: &AppState) -> Option<&sqlx::PgPool> {
     state.persistence.postgres.as_ref()
 }
 
-pub fn to_purchase_order_data(order: &PurchaseOrder) -> PurchaseOrderData {
+pub async fn load_product_name_map(
+    state: &AppState,
+    tenant_id: Uuid,
+    request_id: &str,
+) -> Result<HashMap<i64, String>, AppError> {
+    if state.repository.is_postgres() {
+        let products = state
+            .repository
+            .list_products_by_tenant_all(postgres_pool_or_none(state), tenant_id)
+            .await
+            .map_err(|err| err.with_request_id(request_id.to_string()))?;
+
+        return Ok(products.into_iter().map(|p| (p.id, p.name)).collect());
+    }
+
+    let products = state
+        .products
+        .lock()
+        .map_err(|_| AppError::internal("商品状态锁异常").with_request_id(request_id.to_string()))?;
+
+    Ok(products
+        .values()
+        .filter(|product| product.tenant_id == tenant_id)
+        .map(|product| (product.id, product.name.clone()))
+        .collect())
+}
+
+pub fn to_purchase_order_data(
+    order: &PurchaseOrder,
+    product_name_map: &HashMap<i64, String>,
+) -> PurchaseOrderData {
+    let mut total_amount = Decimal::ZERO;
+    let mut items = Vec::with_capacity(order.items.len());
+
+    for item in &order.items {
+        let rounded_unit_cost = item.unit_cost.round_dp(4);
+        let line_amount = (rounded_unit_cost * Decimal::from(item.qty)).round_dp(4);
+        total_amount += line_amount;
+
+        items.push(PurchaseOrderItemData {
+            product_id: item.product_id,
+            product_name: item
+                .product_name_snapshot
+                .clone()
+                .or_else(|| product_name_map.get(&item.product_id).cloned())
+                .unwrap_or_else(|| format!("商品#{}", item.product_id)),
+            qty: item.qty,
+            unit_cost: rounded_unit_cost.to_string(),
+            line_amount: line_amount.to_string(),
+        });
+    }
+
     PurchaseOrderData {
         id: order.id,
         biz_no: order.biz_no.clone(),
         supplier_id: order.supplier_id,
         status: order.status.as_str().to_string(),
-        items: order
-            .items
-            .iter()
-            .map(|i| PurchaseOrderItemData {
-                product_id: i.product_id,
-                qty: i.qty,
-                unit_cost: i.unit_cost.round_dp(4).to_string(),
-            })
-            .collect(),
+        items,
+        total_amount: total_amount.round_dp(4).to_string(),
         remark: order.remark.clone(),
         version: order.version,
         confirmed_at: order.confirmed_at.clone(),
@@ -476,32 +582,49 @@ pub fn purchase_order_snapshot(order: &PurchaseOrder) -> Value {
     })
 }
 
-pub fn to_sales_order_data(order: &SalesOrder) -> SalesOrderData {
-    let total_amount = order
-        .items
-        .iter()
-        .fold(Decimal::ZERO, |acc, item| {
-            acc + item.sell_price * Decimal::from(item.qty)
-        })
-        .round_dp(4)
-        .to_string();
+pub async fn to_purchase_order_data_with_product_names(
+    state: &AppState,
+    tenant_id: Uuid,
+    request_id: &str,
+    order: &PurchaseOrder,
+) -> Result<PurchaseOrderData, AppError> {
+    let product_name_map = load_product_name_map(state, tenant_id, request_id).await?;
+    Ok(to_purchase_order_data(order, &product_name_map))
+}
+
+pub fn to_sales_order_data(
+    order: &SalesOrder,
+    product_name_map: &HashMap<i64, String>,
+) -> SalesOrderData {
+    let mut total_amount = Decimal::ZERO;
+    let mut items = Vec::with_capacity(order.items.len());
+
+    for item in &order.items {
+        let rounded_sell_price = item.sell_price.round_dp(4);
+        let line_amount = (rounded_sell_price * Decimal::from(item.qty)).round_dp(4);
+        total_amount += line_amount;
+
+        items.push(SalesOrderItemData {
+            product_id: item.product_id,
+            product_name: item
+                .product_name_snapshot
+                .clone()
+                .or_else(|| product_name_map.get(&item.product_id).cloned())
+                .unwrap_or_else(|| format!("商品#{}", item.product_id)),
+            qty: item.qty,
+            sell_price: rounded_sell_price.to_string(),
+            line_amount: line_amount.to_string(),
+            returned_qty: item.returned_qty,
+        });
+    }
 
     SalesOrderData {
         id: order.id,
         biz_no: order.biz_no.clone(),
         customer_id: order.customer_id,
         status: order.status.as_str().to_string(),
-        items: order
-            .items
-            .iter()
-            .map(|i| SalesOrderItemData {
-                product_id: i.product_id,
-                qty: i.qty,
-                sell_price: i.sell_price.round_dp(4).to_string(),
-                returned_qty: i.returned_qty,
-            })
-            .collect(),
-        total_amount,
+        items,
+        total_amount: total_amount.round_dp(4).to_string(),
         remark: order.remark.clone(),
         version: order.version,
         confirmed_at: order.confirmed_at.clone(),
@@ -510,6 +633,16 @@ pub fn to_sales_order_data(order: &SalesOrder) -> SalesOrderData {
         created_at: order.created_at.clone(),
         updated_at: order.updated_at.clone(),
     }
+}
+
+pub async fn to_sales_order_data_with_product_names(
+    state: &AppState,
+    tenant_id: Uuid,
+    request_id: &str,
+    order: &SalesOrder,
+) -> Result<SalesOrderData, AppError> {
+    let product_name_map = load_product_name_map(state, tenant_id, request_id).await?;
+    Ok(to_sales_order_data(order, &product_name_map))
 }
 
 pub fn sales_order_snapshot(order: &SalesOrder) -> Value {
@@ -570,9 +703,8 @@ pub fn parse_user_role_input(raw: &str, request_id: &str) -> Result<UserRole, Ap
         "OWNER" => Ok(UserRole::Owner),
         "PURCHASER" => Ok(UserRole::Purchaser),
         "SALES" => Ok(UserRole::Sales),
-        _ => {
-            Err(AppError::bad_request(format!("无效的角色类型: {raw}")).with_request_id(request_id.to_string()))
-        }
+        _ => Err(AppError::bad_request(format!("无效的角色类型: {raw}"))
+            .with_request_id(request_id.to_string())),
     }
 }
 
@@ -588,10 +720,9 @@ pub fn append_audit_log(
     after_data: Value,
     request_id: &str,
 ) -> Result<(), AppError> {
-    let mut audit_logs = state
-        .audit_logs
-        .lock()
-        .map_err(|_| AppError::internal("审计日志锁异常").with_request_id(request_id.to_string()))?;
+    let mut audit_logs = state.audit_logs.lock().map_err(|_| {
+        AppError::internal("审计日志锁异常").with_request_id(request_id.to_string())
+    })?;
     let log_id = audit_logs.len() as i64 + 1;
     audit_logs.push(AuditLog::now(
         log_id,
@@ -616,7 +747,9 @@ pub fn to_product_data(product: &Product, hide_cost_price: bool) -> ProductData 
         unit: product.unit.clone(),
         current_stock: product.current_stock,
         retail_price: product.retail_price.round_dp(4).to_string(),
-        wholesale_price: product.wholesale_price.round_dp(4).to_string(),
+        last_inbound_unit_cost: product
+            .last_inbound_unit_cost
+            .map(|v| v.round_dp(4).to_string()),
         cost_price: if hide_cost_price {
             None
         } else {
@@ -640,12 +773,31 @@ pub fn barcode_scope_key(tenant_id: &Uuid, barcode: &str) -> String {
     format!("{}:{}", tenant_id, barcode.trim())
 }
 
-pub fn parse_required_text(raw: &str, field_name: &str, request_id: &str) -> Result<String, AppError> {
+pub fn generate_server_biz_no(prefix: &str) -> String {
+    let normalized_prefix = {
+        let trimmed = prefix.trim();
+        if trimmed.is_empty() {
+            "BIZ".to_string()
+        } else {
+            trimmed.to_ascii_uppercase()
+        }
+    };
+
+    let timestamp = Utc::now().format("%Y%m%d%H%M%S");
+    let random = Uuid::new_v4().simple().to_string().to_ascii_uppercase();
+
+    format!("{}-{}-{}", normalized_prefix, timestamp, &random[..8])
+}
+
+pub fn parse_required_text(
+    raw: &str,
+    field_name: &str,
+    request_id: &str,
+) -> Result<String, AppError> {
     let v = raw.trim();
     if v.is_empty() {
-        return Err(
-            AppError::bad_request(format!("{field_name} 不能为空")).with_request_id(request_id.to_string())
-        );
+        return Err(AppError::bad_request(format!("{field_name} 不能为空"))
+            .with_request_id(request_id.to_string()));
     }
     Ok(v.to_string())
 }
@@ -664,13 +816,18 @@ pub fn resolve_report_date(
 ) -> Result<NaiveDate, AppError> {
     match date.map(str::trim).filter(|v| !v.is_empty()) {
         Some(raw_date) => NaiveDate::parse_from_str(raw_date, "%Y-%m-%d").map_err(|_| {
-            AppError::bad_request("date 格式错误，必须为 YYYY-MM-DD").with_request_id(request_id.to_string())
+            AppError::bad_request("date 格式错误，必须为 YYYY-MM-DD")
+                .with_request_id(request_id.to_string())
         }),
         None => Ok(Utc::now().with_timezone(timezone).date_naive()),
     }
 }
 
-pub fn parse_report_date(raw: &str, field_name: &str, request_id: &str) -> Result<NaiveDate, AppError> {
+pub fn parse_report_date(
+    raw: &str,
+    field_name: &str,
+    request_id: &str,
+) -> Result<NaiveDate, AppError> {
     NaiveDate::parse_from_str(raw.trim(), "%Y-%m-%d").map_err(|_| {
         AppError::bad_request(format!("{field_name} 格式错误，必须为 YYYY-MM-DD"))
             .with_request_id(request_id.to_string())
@@ -694,7 +851,8 @@ pub fn decimal_to_xlsx_number(
     request_id: &str,
 ) -> Result<f64, AppError> {
     value.round_dp(2).to_f64().ok_or_else(|| {
-        AppError::internal(format!("xlsx 数值转换失败: {field_name}")).with_request_id(request_id.to_string())
+        AppError::internal(format!("xlsx 数值转换失败: {field_name}"))
+            .with_request_id(request_id.to_string())
     })
 }
 
@@ -760,32 +918,34 @@ pub fn build_sales_report_xlsx_content(
         .set_background_color("#FCE4D6")
         .set_border(FormatBorder::Thin);
 
-    worksheet
-        .set_column_width(0, 14)
-        .map_err(|_| AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string()))?;
-    worksheet
-        .set_column_width(1, 32)
-        .map_err(|_| AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string()))?;
-    worksheet
-        .set_column_width(2, 12)
-        .map_err(|_| AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string()))?;
-    worksheet
-        .set_column_width(3, 16)
-        .map_err(|_| AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string()))?;
-    worksheet
-        .set_column_width(4, 16)
-        .map_err(|_| AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string()))?;
-    worksheet
-        .set_column_width(5, 16)
-        .map_err(|_| AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string()))?;
-    worksheet
-        .set_freeze_panes(1, 0)
-        .map_err(|_| AppError::internal("xlsx 冻结窗格设置失败").with_request_id(request_id.to_string()))?;
+    worksheet.set_column_width(0, 14).map_err(|_| {
+        AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string())
+    })?;
+    worksheet.set_column_width(1, 32).map_err(|_| {
+        AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string())
+    })?;
+    worksheet.set_column_width(2, 12).map_err(|_| {
+        AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string())
+    })?;
+    worksheet.set_column_width(3, 16).map_err(|_| {
+        AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string())
+    })?;
+    worksheet.set_column_width(4, 16).map_err(|_| {
+        AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string())
+    })?;
+    worksheet.set_column_width(5, 16).map_err(|_| {
+        AppError::internal("xlsx 列宽设置失败").with_request_id(request_id.to_string())
+    })?;
+    worksheet.set_freeze_panes(1, 0).map_err(|_| {
+        AppError::internal("xlsx 冻结窗格设置失败").with_request_id(request_id.to_string())
+    })?;
 
     if !rows.is_empty() {
         worksheet
             .autofilter(0, 0, rows.len() as u32, 5)
-            .map_err(|_| AppError::internal("xlsx 自动筛选设置失败").with_request_id(request_id.to_string()))?;
+            .map_err(|_| {
+                AppError::internal("xlsx 自动筛选设置失败").with_request_id(request_id.to_string())
+            })?;
     }
 
     for (col, header) in [
@@ -801,7 +961,9 @@ pub fn build_sales_report_xlsx_content(
     {
         worksheet
             .write_string_with_format(0, col as u16, *header, &header_format)
-            .map_err(|_| AppError::internal("xlsx 表头写入失败").with_request_id(request_id.to_string()))?;
+            .map_err(|_| {
+                AppError::internal("xlsx 表头写入失败").with_request_id(request_id.to_string())
+            })?;
     }
 
     for (idx, row) in rows.iter().enumerate() {
@@ -810,13 +972,19 @@ pub fn build_sales_report_xlsx_content(
 
         worksheet
             .write_string_with_format(line_no, 0, row.product_id.to_string(), &text_center_format)
-            .map_err(|_| AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string()))?;
+            .map_err(|_| {
+                AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string())
+            })?;
         worksheet
             .write_string_with_format(line_no, 1, row.product_name.clone(), &text_left_format)
-            .map_err(|_| AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string()))?;
+            .map_err(|_| {
+                AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string())
+            })?;
         worksheet
             .write_number_with_format(line_no, 2, row.total_qty as f64, &qty_format)
-            .map_err(|_| AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string()))?;
+            .map_err(|_| {
+                AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string())
+            })?;
         worksheet
             .write_number_with_format(
                 line_no,
@@ -824,7 +992,9 @@ pub fn build_sales_report_xlsx_content(
                 decimal_to_xlsx_number(row.total_sales, "total_sales", request_id)?,
                 &money_format,
             )
-            .map_err(|_| AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string()))?;
+            .map_err(|_| {
+                AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string())
+            })?;
         worksheet
             .write_number_with_format(
                 line_no,
@@ -832,7 +1002,9 @@ pub fn build_sales_report_xlsx_content(
                 decimal_to_xlsx_number(row.total_cost, "total_cost", request_id)?,
                 &money_format,
             )
-            .map_err(|_| AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string()))?;
+            .map_err(|_| {
+                AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string())
+            })?;
         worksheet
             .write_number_with_format(
                 line_no,
@@ -840,16 +1012,22 @@ pub fn build_sales_report_xlsx_content(
                 decimal_to_xlsx_number(gross_profit, "gross_profit", request_id)?,
                 &money_format,
             )
-            .map_err(|_| AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string()))?;
+            .map_err(|_| {
+                AppError::internal("xlsx 明细写入失败").with_request_id(request_id.to_string())
+            })?;
     }
 
     let summary_line = (rows.len() + 1) as u32;
     worksheet
         .write_string_with_format(summary_line, 0, "SUMMARY", &summary_label_format)
-        .map_err(|_| AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string()))?;
+        .map_err(|_| {
+            AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string())
+        })?;
     worksheet
         .write_string_with_format(summary_line, 1, "", &summary_text_format)
-        .map_err(|_| AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string()))?;
+        .map_err(|_| {
+            AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string())
+        })?;
     worksheet
         .write_number_with_format(
             summary_line,
@@ -857,7 +1035,9 @@ pub fn build_sales_report_xlsx_content(
             summary_total_qty as f64,
             &summary_qty_format,
         )
-        .map_err(|_| AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string()))?;
+        .map_err(|_| {
+            AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string())
+        })?;
     worksheet
         .write_number_with_format(
             summary_line,
@@ -865,7 +1045,9 @@ pub fn build_sales_report_xlsx_content(
             decimal_to_xlsx_number(summary_total_sales, "summary_total_sales", request_id)?,
             &summary_money_format,
         )
-        .map_err(|_| AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string()))?;
+        .map_err(|_| {
+            AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string())
+        })?;
     worksheet
         .write_number_with_format(
             summary_line,
@@ -873,7 +1055,9 @@ pub fn build_sales_report_xlsx_content(
             decimal_to_xlsx_number(summary_total_cost, "summary_total_cost", request_id)?,
             &summary_money_format,
         )
-        .map_err(|_| AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string()))?;
+        .map_err(|_| {
+            AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string())
+        })?;
     worksheet
         .write_number_with_format(
             summary_line,
@@ -885,7 +1069,9 @@ pub fn build_sales_report_xlsx_content(
             )?,
             &summary_money_format,
         )
-        .map_err(|_| AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string()))?;
+        .map_err(|_| {
+            AppError::internal("xlsx 汇总写入失败").with_request_id(request_id.to_string())
+        })?;
 
     workbook
         .save_to_buffer()
@@ -956,14 +1142,14 @@ pub fn resolve_product_id(
         .map(str::trim)
         .filter(|b| !b.is_empty())
         .ok_or_else(|| {
-            AppError::bad_request("product_id 或 barcode 至少提供一个").with_request_id(request_id.to_string())
+            AppError::bad_request("product_id 或 barcode 至少提供一个")
+                .with_request_id(request_id.to_string())
         })?;
 
     let barcode_key = barcode_scope_key(&tenant_id, barcode);
-    let barcode_index = state
-        .barcode_index
-        .lock()
-        .map_err(|_| AppError::internal("条码索引锁异常").with_request_id(request_id.to_string()))?;
+    let barcode_index = state.barcode_index.lock().map_err(|_| {
+        AppError::internal("条码索引锁异常").with_request_id(request_id.to_string())
+    })?;
 
     barcode_index
         .get(&barcode_key)
@@ -984,9 +1170,8 @@ pub async fn try_idempotent_replay(
             .await?
         {
             if &record.request_payload != request_payload {
-                return Err(
-                    AppError::conflict(4092, "幂等键请求体冲突").with_request_id(request_id.to_string())
-                );
+                return Err(AppError::conflict(4092, "幂等键请求体冲突")
+                    .with_request_id(request_id.to_string()));
             }
 
             let replay_request_id = record
@@ -1008,10 +1193,9 @@ pub async fn try_idempotent_replay(
         return Ok(None);
     }
 
-    let records = state
-        .idempotency_records
-        .lock()
-        .map_err(|_| AppError::internal("幂等记录锁异常").with_request_id(request_id.to_string()))?;
+    let records = state.idempotency_records.lock().map_err(|_| {
+        AppError::internal("幂等记录锁异常").with_request_id(request_id.to_string())
+    })?;
 
     if let Some(record) = records.get(scope_key) {
         let stored_request_payload = record
@@ -1019,7 +1203,8 @@ pub async fn try_idempotent_replay(
             .cloned()
             .unwrap_or_else(|| json!({}));
         if &stored_request_payload != request_payload {
-            return Err(AppError::conflict(4092, "幂等键请求体冲突").with_request_id(request_id.to_string()));
+            return Err(AppError::conflict(4092, "幂等键请求体冲突")
+                .with_request_id(request_id.to_string()));
         }
 
         let response_body = record.get("response_body").cloned().ok_or_else(|| {

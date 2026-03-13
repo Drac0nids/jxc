@@ -4,20 +4,254 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
-use serde_json::json;
+use chrono::{Duration as ChronoDuration, Utc};
+use serde_json::{Value, json};
+use std::time::Duration;
 
+use crate::routes::common::{
+    BarcodeLookupData, BarcodeLookupQuery, CreateProductRequest, DeleteProductQuery,
+    ListProductsQuery, ScanProductData, ScanQuery, UpdateProductRequest, barcode_scope_key,
+    ensure_role, parse_decimal, parse_required_text, postgres_pool_or_none, product_snapshot,
+    require_idempotency_key, save_idempotency_record, save_idempotency_record_sync,
+    to_product_data, try_idempotent_replay,
+};
 use crate::{
     error::AppError,
-    middleware::{AuthContext},
+    extractors::AppJson,
+    middleware::AuthContext,
+    models::{BarcodeLookupCache, BarcodeLookupStatus},
     response::{ApiResponse, build_response_headers, resolve_request_id},
     state::AppState,
 };
-use crate::routes::common::{
-    postgres_pool_or_none, ensure_role, parse_required_text, parse_decimal, 
-    to_product_data, product_snapshot, barcode_scope_key, require_idempotency_key,
-    try_idempotent_replay, save_idempotency_record, save_idempotency_record_sync,
-    ScanQuery, ScanProductData, ListProductsQuery, CreateProductRequest, UpdateProductRequest, DeleteProductQuery
-};
+
+fn extract_name_from_lookup_payload(payload: &Value) -> Option<String> {
+    let candidate_keys = ["product_name", "name", "goods_name", "item_name", "title"];
+
+    for key in candidate_keys {
+        if let Some(name) = payload
+            .get(key)
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|v| !v.is_empty())
+        {
+            return Some(name.to_string());
+        }
+    }
+
+    for key in ["data", "result", "item", "product"] {
+        if let Some(name) = payload.get(key).and_then(extract_name_from_lookup_payload) {
+            return Some(name);
+        }
+    }
+
+    if let Some(items) = payload.as_array() {
+        for item in items {
+            if let Some(name) = extract_name_from_lookup_payload(item) {
+                return Some(name);
+            }
+        }
+    }
+
+    None
+}
+
+async fn lookup_name_from_third_party(
+    state: &AppState,
+    barcode: &str,
+) -> Result<(BarcodeLookupStatus, Option<String>, Value), String> {
+    let api_url = state
+        .config
+        .barcode_lookup_api_url
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .ok_or_else(|| "BARCODE_LOOKUP_API_URL 未配置".to_string())?;
+
+    let timeout_ms = state.config.barcode_lookup_timeout_ms.max(100);
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_millis(timeout_ms))
+        .build()
+        .map_err(|err| format!("创建第三方条码查询客户端失败: {err}"))?;
+
+    let mut request = client.get(api_url).query(&[("barcode", barcode)]);
+
+    if let Some(api_key) = state
+        .config
+        .barcode_lookup_api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+    {
+        request = request.header("x-api-key", api_key);
+    }
+
+    let response = request
+        .send()
+        .await
+        .map_err(|err| format!("调用第三方条码查询失败: {err}"))?;
+
+    if !response.status().is_success() {
+        return Err(format!("第三方条码查询返回非成功状态: {}", response.status()));
+    }
+
+    let payload = response
+        .json::<Value>()
+        .await
+        .map_err(|err| format!("解析第三方条码查询响应失败: {err}"))?;
+
+    let suggested_name = extract_name_from_lookup_payload(&payload);
+    let lookup_status = if suggested_name.is_some() {
+        BarcodeLookupStatus::Found
+    } else {
+        BarcodeLookupStatus::NotFound
+    };
+
+    Ok((lookup_status, suggested_name, payload))
+}
+
+pub async fn barcode_lookup_product_name(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
+    Query(query): Query<BarcodeLookupQuery>,
+) -> Result<Response, AppError> {
+    let request_id = resolve_request_id(&headers);
+    ensure_role(&auth.role, &["OWNER", "PURCHASER", "SALES"], &request_id)?;
+
+    let barcode = query.barcode.trim();
+    if barcode.is_empty() {
+        return Err(AppError::bad_request("barcode 不能为空").with_request_id(request_id));
+    }
+
+    let now = Utc::now();
+    let cache_record = if state.repository.is_postgres() {
+        state
+            .repository
+            .find_barcode_lookup_cache(postgres_pool_or_none(&state), auth.tenant_id, barcode)
+            .await?
+    } else {
+        let cache = state.barcode_lookup_cache.lock().map_err(|_| {
+            AppError::internal("条码查询缓存锁异常").with_request_id(request_id.clone())
+        })?;
+        let key = barcode_scope_key(&auth.tenant_id, barcode);
+        cache.get(&key).cloned()
+    };
+
+    if let Some(cache) = cache_record.clone()
+        && cache.expires_at > now
+    {
+        let body = ApiResponse::success(
+            BarcodeLookupData {
+                barcode: barcode.to_string(),
+                status: cache.lookup_status.as_str().to_string(),
+                suggested_name: cache.product_name.clone(),
+                cache_hit: true,
+                source: "CACHE".to_string(),
+            },
+            request_id.clone(),
+        );
+
+        return Ok((
+            StatusCode::OK,
+            build_response_headers(&request_id, false),
+            Json(body),
+        )
+            .into_response());
+    }
+
+    let stale_cache = cache_record.filter(|cache| cache.expires_at <= now);
+
+    match lookup_name_from_third_party(&state, barcode).await {
+        Ok((lookup_status, suggested_name, raw_payload)) => {
+            let ttl_secs = match lookup_status {
+                BarcodeLookupStatus::Found => state.config.barcode_lookup_found_ttl_secs.max(1),
+                BarcodeLookupStatus::NotFound => {
+                    state.config.barcode_lookup_not_found_ttl_secs.max(1)
+                }
+            };
+
+            let cache_entry = BarcodeLookupCache {
+                tenant_id: auth.tenant_id,
+                barcode: barcode.to_string(),
+                lookup_status,
+                product_name: suggested_name.clone(),
+                raw_payload,
+                expires_at: now + ChronoDuration::seconds(ttl_secs),
+                updated_at: now,
+            };
+
+            if state.repository.is_postgres() {
+                state
+                    .repository
+                    .upsert_barcode_lookup_cache(postgres_pool_or_none(&state), &cache_entry)
+                    .await?;
+            } else {
+                let mut cache = state.barcode_lookup_cache.lock().map_err(|_| {
+                    AppError::internal("条码查询缓存锁异常").with_request_id(request_id.clone())
+                })?;
+                let key = barcode_scope_key(&auth.tenant_id, barcode);
+                cache.insert(key, cache_entry);
+            }
+
+            let body = ApiResponse::success(
+                BarcodeLookupData {
+                    barcode: barcode.to_string(),
+                    status: lookup_status.as_str().to_string(),
+                    suggested_name,
+                    cache_hit: false,
+                    source: "THIRD_PARTY".to_string(),
+                },
+                request_id.clone(),
+            );
+
+            Ok((
+                StatusCode::OK,
+                build_response_headers(&request_id, false),
+                Json(body),
+            )
+                .into_response())
+        }
+        Err(_) => {
+            if let Some(cache) = stale_cache {
+                let body = ApiResponse::success(
+                    BarcodeLookupData {
+                        barcode: barcode.to_string(),
+                        status: cache.lookup_status.as_str().to_string(),
+                        suggested_name: cache.product_name,
+                        cache_hit: true,
+                        source: "CACHE_STALE".to_string(),
+                    },
+                    request_id.clone(),
+                );
+
+                return Ok((
+                    StatusCode::OK,
+                    build_response_headers(&request_id, false),
+                    Json(body),
+                )
+                    .into_response());
+            }
+
+            let body = ApiResponse::success(
+                BarcodeLookupData {
+                    barcode: barcode.to_string(),
+                    status: BarcodeLookupStatus::NotFound.as_str().to_string(),
+                    suggested_name: None,
+                    cache_hit: false,
+                    source: "DEGRADED".to_string(),
+                },
+                request_id.clone(),
+            );
+
+            Ok((
+                StatusCode::OK,
+                build_response_headers(&request_id, false),
+                Json(body),
+            )
+                .into_response())
+        }
+    }
+}
 
 pub async fn scan_product(
     State(state): State<AppState>,
@@ -149,7 +383,24 @@ pub async fn list_products(
         filtered.retain(|p| p.barcode == *barcode);
     }
 
-    filtered.sort_by_key(|p| p.id);
+    let low_stock_only = query
+        .low_stock
+        .as_deref()
+        .map(str::trim)
+        .map(|v| v.eq_ignore_ascii_case("true"))
+        .unwrap_or(false);
+
+    if low_stock_only {
+        filtered.retain(|p| p.current_stock < p.min_stock_limit);
+        // Sort by shortage (gap) descending - largest deficit first
+        filtered.sort_by(|a, b| {
+            let gap_a = a.min_stock_limit - a.current_stock;
+            let gap_b = b.min_stock_limit - b.current_stock;
+            gap_b.cmp(&gap_a).then_with(|| a.id.cmp(&b.id))
+        });
+    } else {
+        filtered.sort_by_key(|p| p.id);
+    }
 
     let total = filtered.len() as u64;
     let start = ((page - 1) * page_size) as usize;
@@ -231,7 +482,7 @@ pub async fn create_product(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
-    Json(req): Json<CreateProductRequest>,
+    AppJson(req): AppJson<CreateProductRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
@@ -255,7 +506,6 @@ pub async fn create_product(
     let name = parse_required_text(&req.name, "name", &request_id)?;
     let unit = parse_required_text(&req.unit, "unit", &request_id)?;
     let retail_price = parse_decimal(&req.retail_price, "retail_price", &request_id)?;
-    let wholesale_price = parse_decimal(&req.wholesale_price, "wholesale_price", &request_id)?;
 
     if let Some(raw) = &req.sku
         && raw.trim().is_empty()
@@ -273,15 +523,8 @@ pub async fn create_product(
         return Err(AppError::bad_request("min_stock_limit 不能小于 0").with_request_id(request_id));
     }
 
-    let cost_price = match req
-        .cost_price
-        .as_deref()
-        .map(str::trim)
-        .filter(|v| !v.is_empty())
-    {
-        Some(raw) => parse_decimal(raw, "cost_price", &request_id)?,
-        None => rust_decimal::Decimal::ZERO,
-    };
+    let cost_price_raw = parse_required_text(&req.cost_price, "cost_price", &request_id)?;
+    let cost_price = parse_decimal(&cost_price_raw, "cost_price", &request_id)?;
 
     if state.repository.is_postgres() {
         let sku = req
@@ -328,7 +571,7 @@ pub async fn create_product(
             current_stock: init_stock,
             cost_price: cost_price.round_dp(4),
             retail_price: retail_price.round_dp(4),
-            wholesale_price: wholesale_price.round_dp(4),
+            last_inbound_unit_cost: None,
             min_stock_limit,
             version: 1,
             is_deleted: false,
@@ -404,7 +647,7 @@ pub async fn create_product(
         current_stock: init_stock,
         cost_price: cost_price.round_dp(4),
         retail_price: retail_price.round_dp(4),
-        wholesale_price: wholesale_price.round_dp(4),
+        last_inbound_unit_cost: None,
         min_stock_limit,
         version: 1,
         is_deleted: false,
@@ -429,6 +672,8 @@ pub async fn create_product(
             product.current_stock,
             product.current_stock,
             product.cost_price,
+            None,
+            None,
             auth.user_id,
         ));
     }
@@ -452,7 +697,7 @@ pub async fn update_product(
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Path(id): Path<i64>,
-    Json(req): Json<UpdateProductRequest>,
+    AppJson(req): AppJson<UpdateProductRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
@@ -492,10 +737,6 @@ pub async fn update_product(
         Some(raw) => Some(parse_decimal(raw, "retail_price", &request_id)?),
         None => None,
     };
-    let wholesale_price = match req.wholesale_price.as_deref() {
-        Some(raw) => Some(parse_decimal(raw, "wholesale_price", &request_id)?),
-        None => None,
-    };
     let min_stock_limit = req.min_stock_limit;
 
     if min_stock_limit.is_none()
@@ -504,7 +745,6 @@ pub async fn update_product(
         && name.is_none()
         && unit.is_none()
         && retail_price.is_none()
-        && wholesale_price.is_none()
     {
         return Err(AppError::bad_request("至少提供一个可更新字段").with_request_id(request_id));
     }
@@ -542,7 +782,6 @@ pub async fn update_product(
         let new_name = name.unwrap_or_else(|| existing.name.clone());
         let new_unit = unit.unwrap_or_else(|| existing.unit.clone());
         let new_retail_price = retail_price.unwrap_or(existing.retail_price);
-        let new_wholesale_price = wholesale_price.unwrap_or(existing.wholesale_price);
         let new_min_stock_limit = min_stock_limit.unwrap_or(existing.min_stock_limit);
 
         if state
@@ -578,7 +817,7 @@ pub async fn update_product(
             current_stock: existing.current_stock,
             cost_price: existing.cost_price,
             retail_price: new_retail_price.round_dp(4),
-            wholesale_price: new_wholesale_price.round_dp(4),
+            last_inbound_unit_cost: existing.last_inbound_unit_cost,
             min_stock_limit: new_min_stock_limit,
             version: existing.version + 1,
             is_deleted: existing.is_deleted,
@@ -639,7 +878,6 @@ pub async fn update_product(
     let new_name = name.unwrap_or_else(|| existing.name.clone());
     let new_unit = unit.unwrap_or_else(|| existing.unit.clone());
     let new_retail_price = retail_price.unwrap_or(existing.retail_price);
-    let new_wholesale_price = wholesale_price.unwrap_or(existing.wholesale_price);
     let new_min_stock_limit = min_stock_limit.unwrap_or(existing.min_stock_limit);
 
     if products.values().any(|p| {
@@ -675,7 +913,6 @@ pub async fn update_product(
     product.name = new_name;
     product.unit = new_unit;
     product.retail_price = new_retail_price.round_dp(4);
-    product.wholesale_price = new_wholesale_price.round_dp(4);
     product.min_stock_limit = new_min_stock_limit;
     product.version += 1;
     let updated = product.clone();
