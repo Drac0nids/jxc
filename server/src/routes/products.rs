@@ -571,7 +571,11 @@ pub async fn create_product(
             current_stock: init_stock,
             cost_price: cost_price.round_dp(4),
             retail_price: retail_price.round_dp(4),
-            last_inbound_unit_cost: None,
+            last_inbound_unit_cost: if init_stock > 0 {
+                Some(cost_price.round_dp(4))
+            } else {
+                None
+            },
             min_stock_limit,
             version: 1,
             is_deleted: false,
@@ -647,7 +651,11 @@ pub async fn create_product(
         current_stock: init_stock,
         cost_price: cost_price.round_dp(4),
         retail_price: retail_price.round_dp(4),
-        last_inbound_unit_cost: None,
+        last_inbound_unit_cost: if init_stock > 0 {
+            Some(cost_price.round_dp(4))
+        } else {
+            None
+        },
         min_stock_limit,
         version: 1,
         is_deleted: false,
