@@ -482,15 +482,21 @@ class _ProductCard extends StatelessWidget {
             ? const Color(0xFFF59E0B)
             : const Color(0xFF10B981);
 
-    // Price & profit
+    // Price & profit — 均摊成本用于毛利率计算
     final double? retailVal =
         double.tryParse(product.retailPrice.replaceAll('¥', ''));
-    final double? costVal = canViewCostPrice && product.costPrice != null
+    final double? avgCostVal = canViewCostPrice && product.costPrice != null
         ? double.tryParse(product.costPrice!.replaceAll('¥', ''))
         : null;
+    final double? lastInboundVal =
+        canViewCostPrice && product.lastInboundUnitCost != null
+            ? double.tryParse(
+                product.lastInboundUnitCost!.replaceAll('¥', ''))
+            : null;
+    // 毛利率基于加权均摊成本计算
     final String? profitRateStr =
-        (retailVal != null && costVal != null && retailVal > 0)
-            ? '${((retailVal - costVal) / retailVal * 100).toStringAsFixed(1)}%'
+        (retailVal != null && avgCostVal != null && retailVal > 0)
+            ? '${((retailVal - avgCostVal) / retailVal * 100).toStringAsFixed(1)}%'
             : null;
 
     return Container(
@@ -664,19 +670,17 @@ class _ProductCard extends StatelessWidget {
                         ),
                       ],
                     ),
-                    if (canViewCostPrice && product.costPrice != null) ...<
-                        Widget>[
-                      const SizedBox(width: 16),
+                    if (canViewCostPrice && product.costPrice != null) ...[
+                      const SizedBox(width: 12),
                       Container(
                           width: 1,
                           height: 28,
-                          color:
-                              cs.outlineVariant.withValues(alpha: 0.5)),
-                      const SizedBox(width: 16),
+                          color: cs.outlineVariant.withValues(alpha: 0.5)),
+                      const SizedBox(width: 12),
                       Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: <Widget>[
-                          Text('进货价',
+                          Text('均摊成本',
                               style: TextStyle(
                                   fontSize: 10,
                                   color: cs.onSurfaceVariant)),
@@ -690,6 +694,32 @@ class _ProductCard extends StatelessWidget {
                           ),
                         ],
                       ),
+                      if (lastInboundVal != null) ...[
+                        const SizedBox(width: 12),
+                        Container(
+                            width: 1,
+                            height: 28,
+                            color:
+                                cs.outlineVariant.withValues(alpha: 0.5)),
+                        const SizedBox(width: 12),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: <Widget>[
+                            Text('最近进货',
+                                style: TextStyle(
+                                    fontSize: 10,
+                                    color: cs.onSurfaceVariant)),
+                            Text(
+                              '¥${product.lastInboundUnitCost}',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: cs.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ],
                     if (profitRateStr != null) ...<Widget>[
                       const Spacer(),
