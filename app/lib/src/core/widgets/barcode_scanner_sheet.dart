@@ -7,8 +7,6 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 class BarcodeScannerSheet {
   const BarcodeScannerSheet._();
 
-  // 限制识别类型：仅识别标准商品条码(EAN/UPC)、通用的一维码(Code128/39)与二维码。
-  // 可以有效防止错扫外箱上的 ITF-14 内部物流码、Codabar 快递单号或其他冷门条码。
   static const List<BarcodeFormat> _supportedFormats = <BarcodeFormat>[
     BarcodeFormat.ean13,
     BarcodeFormat.ean8,
@@ -64,12 +62,17 @@ class BarcodeScannerSheet {
   /// [onScanned] 回调语义：
   /// - 返回非 null String → 命中成功，该字符串用作弹窗内显示标签（如商品名 + 数量）
   /// - 返回 null           → 未命中 / 处理失败，弹窗内以红色提示
+  ///
+  /// [onUndo] 可选撤销回调：
+  /// - 提供后，状态条上最后一次成功扫码旁边会出现「↩ 撤销」按钮
+  /// - 返回 true → 撤销成功；返回 false → 撤销失败（弹窗内显示提示）
   static Future<void> scanContinuous(
     BuildContext context, {
     String title = '连续扫码',
     String hint = '将条码对准取景框，系统会持续识别；完成后手动结束。',
     int deduplicateWindowMs = 1200,
     required FutureOr<String?> Function(String barcode) onScanned,
+    FutureOr<bool> Function(String barcode)? onUndo,
   }) async {
     final MobileScannerController cameraController = MobileScannerController(
       // 连续扫码必须用 normal，noDuplicates 会在扫到一个码后暂停检测
@@ -91,6 +94,7 @@ class BarcodeScannerSheet {
             hint: hint,
             deduplicateWindowMs: deduplicateWindowMs,
             onScanned: onScanned,
+            onUndo: onUndo,
           );
         },
       );
@@ -124,7 +128,6 @@ class _TorchButton extends StatelessWidget {
     return ValueListenableBuilder<MobileScannerState>(
       valueListenable: controller,
       builder: (_, MobileScannerState state, __) {
-        // 手电筒不可用时（如前置摄像头）不显示按钮
         if (!state.isInitialized || state.torchState == TorchState.unavailable) {
           return const SizedBox.shrink();
         }
@@ -165,7 +168,6 @@ Widget _buildCameraView({
 }) {
   return Stack(
     children: <Widget>[
-      // 取景框
       Positioned.fill(
         child: ClipRRect(
           borderRadius: BorderRadius.circular(12),
@@ -175,7 +177,6 @@ Widget _buildCameraView({
           ),
         ),
       ),
-      // 手电筒按钮（右上角）
       Positioned(
         top: 10,
         right: 10,
@@ -261,17 +262,19 @@ class _ScanEntry {
     required this.barcode,
     required this.label, // null = 未命中
     required this.time,
+    this.undone = false,
   });
 
   final String barcode;
   final String? label;
   final DateTime time;
+  bool undone; // 是否已撤销
 
   bool get success => label != null;
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 连续扫码弹窗（优化版）
+// 连续扫码弹窗（含撤销功能）
 // ════════════════════════════════════════════════════════════════════════════
 
 class _ContinuousBarcodeScannerBottomSheet extends StatefulWidget {
@@ -281,6 +284,7 @@ class _ContinuousBarcodeScannerBottomSheet extends StatefulWidget {
     required this.hint,
     required this.deduplicateWindowMs,
     required this.onScanned,
+    this.onUndo,
   });
 
   final MobileScannerController controller;
@@ -288,6 +292,7 @@ class _ContinuousBarcodeScannerBottomSheet extends StatefulWidget {
   final String hint;
   final int deduplicateWindowMs;
   final FutureOr<String?> Function(String barcode) onScanned;
+  final FutureOr<bool> Function(String barcode)? onUndo;
 
   @override
   State<_ContinuousBarcodeScannerBottomSheet> createState() =>
@@ -297,6 +302,7 @@ class _ContinuousBarcodeScannerBottomSheet extends StatefulWidget {
 class _ContinuousBarcodeScannerBottomSheetState
     extends State<_ContinuousBarcodeScannerBottomSheet> {
   bool _processing = false;
+  bool _undoing = false;
   int _successCount = 0;
   String _lastBarcode = '';
   int _lastAtMs = 0;
@@ -305,8 +311,18 @@ class _ContinuousBarcodeScannerBottomSheetState
   final List<_ScanEntry> _recentScans = [];
   static const int _maxHistory = 4;
 
+  /// 最近一条「可撤销」的成功扫码（未撤销）
+  _ScanEntry? get _undoableEntry {
+    if (widget.onUndo == null) return null;
+    try {
+      return _recentScans.firstWhere((e) => e.success && !e.undone);
+    } catch (_) {
+      return null;
+    }
+  }
+
   Future<void> _onDetect(BarcodeCapture capture) async {
-    if (_processing) return;
+    if (_processing || _undoing) return;
 
     final String? barcode = BarcodeScannerSheet.extractRawBarcode(capture);
     if (barcode == null) return;
@@ -332,7 +348,6 @@ class _ContinuousBarcodeScannerBottomSheetState
       );
 
       if (label != null) {
-        // ✅ 成功：轻触觉
         HapticFeedback.lightImpact();
         setState(() {
           _successCount += 1;
@@ -340,7 +355,6 @@ class _ContinuousBarcodeScannerBottomSheetState
           if (_recentScans.length > _maxHistory) _recentScans.removeLast();
         });
       } else {
-        // ❌ 未命中：中等触觉（与成功不同，让手感提示操作员注意）
         HapticFeedback.mediumImpact();
         setState(() {
           _recentScans.insert(0, entry);
@@ -349,6 +363,33 @@ class _ContinuousBarcodeScannerBottomSheetState
       }
     } finally {
       _processing = false;
+    }
+  }
+
+  Future<void> _handleUndo(_ScanEntry entry) async {
+    if (_undoing || widget.onUndo == null) return;
+    setState(() => _undoing = true);
+
+    try {
+      final bool ok = await widget.onUndo!(entry.barcode);
+      if (!mounted) return;
+
+      if (ok) {
+        HapticFeedback.mediumImpact();
+        setState(() {
+          entry.undone = true;
+          _successCount = (_successCount - 1).clamp(0, 99999);
+        });
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('撤销失败，请手动修改'),
+            behavior: SnackBarBehavior.floating,
+          ),
+        );
+      }
+    } finally {
+      if (mounted) setState(() => _undoing = false);
     }
   }
 
@@ -365,6 +406,7 @@ class _ContinuousBarcodeScannerBottomSheetState
     final double sheetHeight = MediaQuery.of(context).size.height * 0.88;
     final _ScanEntry? lastEntry =
         _recentScans.isNotEmpty ? _recentScans.first : null;
+    final _ScanEntry? undoable = _undoableEntry;
 
     return SizedBox(
       height: sheetHeight,
@@ -404,7 +446,7 @@ class _ContinuousBarcodeScannerBottomSheetState
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    '已入库 $_successCount 条',
+                    '已处理 $_successCount 条',
                     style: const TextStyle(
                       fontSize: 12,
                       fontWeight: FontWeight.w700,
@@ -421,12 +463,12 @@ class _ContinuousBarcodeScannerBottomSheetState
             ),
             const SizedBox(height: 10),
 
-            // ── 实时状态条（最新一条结果） ──────────────────────────
+            // ── 实时状态条（最新一条结果 + 撤销按钮）──────────────
             AnimatedSwitcher(
               duration: const Duration(milliseconds: 250),
               child: lastEntry == null
                   ? _buildWaitingBanner(cs)
-                  : _buildStatusBanner(cs, lastEntry),
+                  : _buildStatusBanner(cs, lastEntry, undoable),
             ),
             const SizedBox(height: 10),
 
@@ -484,12 +526,27 @@ class _ContinuousBarcodeScannerBottomSheetState
     );
   }
 
-  Widget _buildStatusBanner(ColorScheme cs, _ScanEntry entry) {
-    final isOk = entry.success;
-    final bannerColor = isOk ? const Color(0xFF10B981) : cs.error;
+  Widget _buildStatusBanner(
+    ColorScheme cs,
+    _ScanEntry entry,
+    _ScanEntry? undoable,
+  ) {
+    final isOk = entry.success && !entry.undone;
+    final isUndone = entry.undone;
+    final Color bannerColor;
+    if (isUndone) {
+      bannerColor = cs.onSurfaceVariant;
+    } else if (isOk) {
+      bannerColor = const Color(0xFF10B981);
+    } else {
+      bannerColor = cs.error;
+    }
+
+    // 撤销按钮：仅在有可撤销的最新成功条目时展示
+    final bool showUndo = undoable != null && undoable == entry && !_undoing;
 
     return AnimatedContainer(
-      key: ValueKey(entry.time),
+      key: ValueKey(entry.time.microsecondsSinceEpoch),
       duration: const Duration(milliseconds: 200),
       width: double.infinity,
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
@@ -501,7 +558,11 @@ class _ContinuousBarcodeScannerBottomSheetState
       child: Row(
         children: <Widget>[
           Icon(
-            isOk ? Icons.check_circle_rounded : Icons.error_outline_rounded,
+            isUndone
+                ? Icons.undo_rounded
+                : isOk
+                    ? Icons.check_circle_rounded
+                    : Icons.error_outline_rounded,
             size: 16,
             color: bannerColor,
           ),
@@ -511,15 +572,20 @@ class _ContinuousBarcodeScannerBottomSheetState
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  isOk ? entry.label! : '未命中：${entry.barcode}',
+                  isUndone
+                      ? '已撤销：${entry.label}'
+                      : isOk
+                          ? entry.label!
+                          : '未命中：${entry.barcode}',
                   style: TextStyle(
                     fontSize: 13,
                     fontWeight: FontWeight.w600,
                     color: bannerColor,
+                    decoration: isUndone ? TextDecoration.lineThrough : null,
                   ),
                   overflow: TextOverflow.ellipsis,
                 ),
-                if (!isOk)
+                if (!isOk && !isUndone)
                   Text(
                     '该条码未建档，请退出后手工录入或新建商品',
                     style: TextStyle(
@@ -529,37 +595,92 @@ class _ContinuousBarcodeScannerBottomSheetState
               ],
             ),
           ),
+          // 撤销按钮
+          if (showUndo) ...<Widget>[
+            const SizedBox(width: 8),
+            GestureDetector(
+              onTap: () => _handleUndo(entry),
+              child: Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: cs.errorContainer,
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(Icons.undo_rounded,
+                        size: 13, color: cs.onErrorContainer),
+                    const SizedBox(width: 3),
+                    Text(
+                      '撤销',
+                      style: TextStyle(
+                        fontSize: 12,
+                        fontWeight: FontWeight.w600,
+                        color: cs.onErrorContainer,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ],
+          if (_undoing && undoable == entry) ...<Widget>[
+            const SizedBox(width: 8),
+            SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: cs.onSurfaceVariant,
+              ),
+            ),
+          ],
         ],
       ),
     );
   }
 
   Widget _buildHistoryRow(ColorScheme cs, _ScanEntry e) {
+    final Color color;
+    final IconData icon;
+    if (e.undone) {
+      color = cs.onSurfaceVariant.withValues(alpha: 0.5);
+      icon = Icons.undo_rounded;
+    } else if (e.success) {
+      color = const Color(0xFF10B981);
+      icon = Icons.check_circle_outline_rounded;
+    } else {
+      color = cs.error;
+      icon = Icons.highlight_off_rounded;
+    }
+
     return Padding(
       padding: const EdgeInsets.only(bottom: 4),
       child: Row(
         children: <Widget>[
-          Icon(
-            e.success
-                ? Icons.check_circle_outline_rounded
-                : Icons.highlight_off_rounded,
-            size: 14,
-            color: e.success ? const Color(0xFF10B981) : cs.error,
-          ),
+          Icon(icon, size: 14, color: color),
           const SizedBox(width: 6),
           Expanded(
             child: Text(
-              e.success ? e.label! : e.barcode,
+              e.undone
+                  ? '已撤销：${e.label}'
+                  : e.success
+                      ? e.label!
+                      : e.barcode,
               style: TextStyle(
                 fontSize: 12,
-                color: e.success ? cs.onSurface : cs.error,
+                color: color,
+                decoration: e.undone ? TextDecoration.lineThrough : null,
               ),
               overflow: TextOverflow.ellipsis,
             ),
           ),
           Text(
             _fmtTime(e.time),
-            style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+            style:
+                TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
           ),
         ],
       ),

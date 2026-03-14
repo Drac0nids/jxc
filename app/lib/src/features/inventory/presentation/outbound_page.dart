@@ -744,6 +744,35 @@ class _OutboundPageState extends State<OutboundPage> {
         );
         return matched.productName.isNotEmpty ? matched.productName : barcode;
       },
+      onUndo: (String barcode) {
+        // 找到最近一条与条码匹配的 _itemEditors 行，qty - 1；变 0 则整行删除
+        final int idx = _itemEditors.lastIndexWhere(
+          (e) => e.productIdController.text.isNotEmpty &&
+              e.qtyController.text.trim().isNotEmpty,
+        );
+        if (idx < 0) return false;
+
+        final editor = _itemEditors[idx];
+        final int currentQty =
+            int.tryParse(editor.qtyController.text.trim()) ?? 0;
+        if (currentQty <= 0) return false;
+
+        setState(() {
+          if (currentQty <= 1) {
+            final removed = _itemEditors.removeAt(idx);
+            removed.dispose();
+            // 确保至少保留一个空行
+            if (_itemEditors.isEmpty) {
+              _itemEditors.add(_createItemEditors());
+            }
+          } else {
+            editor.qtyController.text = (currentQty - 1).toString();
+          }
+          _continuousProcessedCount =
+              (_continuousProcessedCount - 1).clamp(0, 99999);
+        });
+        return true;
+      },
     );
 
     if (!mounted) {

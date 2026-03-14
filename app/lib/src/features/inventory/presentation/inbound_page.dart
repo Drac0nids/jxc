@@ -709,6 +709,37 @@ class _InboundPageState extends State<InboundPage> {
         final int qty = int.tryParse(result.qtyText) ?? 1;
         return '${result.productName}  x$qty';
       },
+      onUndo: (String barcode) {
+        // 找到最近一条与该条码匹配的 draft item，qty - 1；变 0 则整行删除
+        final int idx = _draftItems.lastIndexWhere(
+          (item) => item.barcode == barcode,
+        );
+        if (idx < 0) return false;
+
+        final item = _draftItems[idx];
+        final int currentQty = int.tryParse(item.qty.trim()) ?? 0;
+        if (currentQty <= 0) return false;
+
+        setState(() {
+          if (currentQty <= 1) {
+            _draftItems.removeAt(idx);
+          } else {
+            _draftItems[idx] = _InboundDraftItem(
+              localId: item.localId,
+              productId: item.productId,
+              barcode: item.barcode,
+              productName: item.productName,
+              qty: (currentQty - 1).toString(),
+              unitCost: item.unitCost,
+              expectedVersion: item.expectedVersion,
+              remark: item.remark,
+            );
+          }
+          _continuousProcessedCount =
+              (_continuousProcessedCount - 1).clamp(0, 99999);
+        });
+        return true;
+      },
     );
 
     if (!mounted) {
