@@ -104,6 +104,21 @@ async fn apply_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
     ];
 
     for (name, sql) in migrations {
+        // 先检查是否已经执行过，避免重复执行导致 DDL 冲突
+        let already_applied: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM schema_migrations WHERE version = $1)",
+        )
+        .bind(name)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(false); // schema_migrations 表本身不存在时走 0001_init 创建
+
+        if already_applied {
+            tracing::debug!(migration = name, "skipping already applied migration");
+            continue;
+        }
+
+        tracing::info!(migration = name, "applying migration");
         raw_sql(sql)
             .execute(pool)
             .await

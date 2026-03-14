@@ -134,16 +134,10 @@ class _AuthPageState extends State<AuthPage> {
                                   LengthLimitingTextInputFormatter(8),
                                 ],
                                 decoration: InputDecoration(
-                                  labelText: '租户码',
-                                  hintText: '上次登录后已自动记住',
+                                  labelText: '租户码 *',
+                                  hintText: '登录后自动记住，下次无需重填',
                                   prefixIcon: const Icon(Icons.domain_rounded),
-                                  helperText: '第一次登录后自动记住，屏幕左上角可看租户码',
-                                  suffixIcon: _tenantCodeController.text.isNotEmpty
-                                    ? null
-                                    : const Tooltip(
-                                        message: '直接点登录，不输租户码将按用户名全局查询（兼容旧版本）',
-                                        child: Icon(Icons.info_outline, size: 16),
-                                      ),
+                                  helperText: '注册后系统自动生成，可在「人员管理」页查看',
                                 ),
                                 onChanged: (_) => setState(() {}),
                               ),
@@ -208,7 +202,7 @@ class _AuthPageState extends State<AuthPage> {
                             if (!_isRegisterMode) ...<Widget>[
                               const SizedBox(height: 10),
                               Text(
-                                '演示账号：admin / admin123',
+                                '演示账号：租户码 DEMO01 / admin / admin123',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: colorScheme.onSurfaceVariant,
                                 ),
@@ -245,6 +239,11 @@ class _AuthPageState extends State<AuthPage> {
     final password = _passwordController.text;
     final tenantCode = _tenantCodeController.text.trim();
 
+    if (tenantCode.isEmpty) {
+      _showMessage('请输入租户码');
+      return;
+    }
+
     if (username.isEmpty || password.isEmpty) {
       _showMessage('请输入用户名和密码');
       return;
@@ -253,7 +252,7 @@ class _AuthPageState extends State<AuthPage> {
     await widget.sessionController.login(
       username: username,
       password: password,
-      tenantCode: tenantCode.isEmpty ? null : tenantCode.toUpperCase(),
+      tenantCode: tenantCode.toUpperCase(),
     );
   }
 

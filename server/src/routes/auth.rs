@@ -161,44 +161,30 @@ pub async fn login(
 
     let username = req.username.trim();
     let user = if state.repository.is_postgres() {
-        // 优先用 tenant_code + username 精确定位租户，防止跨租户同名
-        if let Some(ref code) = req.tenant_code {
-            let code = code.trim();
-            if !code.is_empty() {
-                state
-                    .repository
-                    .find_user_by_tenant_code_and_username(
-                        postgres_pool_or_none(&state),
-                        code,
-                        username,
-                    )
-                    .await?
-                    .ok_or_else(|| {
-                        AppError::unauthorized("租户码或用户名/密码错误")
-                            .with_request_id(request_id.clone())
-                    })?
-            } else {
-                // 向后兼容：没有 tenant_code 时按用户名全局查
-                state
-                    .repository
-                    .find_user_by_username(postgres_pool_or_none(&state), username)
-                    .await?
-                    .ok_or_else(|| {
-                        AppError::unauthorized("用户名或密码错误")
-                            .with_request_id(request_id.clone())
-                    })?
-            }
-        } else {
-            state
-                .repository
-                .find_user_by_username(postgres_pool_or_none(&state), username)
-                .await?
-                .ok_or_else(|| {
-                    AppError::unauthorized("用户名或密码错误")
-                        .with_request_id(request_id.clone())
-                })?
-        }
+        // PostgreSQL 模式强制要求租户码，确保多租户严格隔离
+        let code = req
+            .tenant_code
+            .as_deref()
+            .map(str::trim)
+            .filter(|s| !s.is_empty())
+            .ok_or_else(|| {
+                AppError::bad_request("请输入租户码").with_request_id(request_id.clone())
+            })?;
+
+        state
+            .repository
+            .find_user_by_tenant_code_and_username(
+                postgres_pool_or_none(&state),
+                code,
+                username,
+            )
+            .await?
+            .ok_or_else(|| {
+                AppError::unauthorized("租户码或用户名/密码错误")
+                    .with_request_id(request_id.clone())
+            })?
     } else {
+        // 内存模式（本地演示）无租户概念，直接按用户名查
         let users = state.users.lock().map_err(|_| {
             AppError::internal("用户状态锁异常").with_request_id(request_id.clone())
         })?;
