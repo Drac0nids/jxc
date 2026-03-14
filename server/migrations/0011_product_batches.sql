@@ -1,6 +1,6 @@
 -- 商品批次管理（方案A：轻量批次，库存合并，批次过期预警）
 
-CREATE TABLE product_batches (
+CREATE TABLE IF NOT EXISTS product_batches (
     id           BIGSERIAL PRIMARY KEY,
     tenant_id    UUID NOT NULL,
     product_id   BIGINT NOT NULL REFERENCES products(id),
@@ -16,7 +16,7 @@ CREATE TABLE product_batches (
 );
 
 -- 常用查询索引
-CREATE INDEX idx_product_batches_tenant    ON product_batches (tenant_id);
-CREATE INDEX idx_product_batches_product   ON product_batches (tenant_id, product_id);
-CREATE INDEX idx_product_batches_expiring  ON product_batches (tenant_id, expires_at)
+CREATE INDEX IF NOT EXISTS idx_product_batches_tenant    ON product_batches (tenant_id);
+CREATE INDEX IF NOT EXISTS idx_product_batches_product   ON product_batches (tenant_id, product_id);
+CREATE INDEX IF NOT EXISTS idx_product_batches_expiring  ON product_batches (tenant_id, expires_at)
     WHERE is_sold_out = FALSE AND expires_at IS NOT NULL;
