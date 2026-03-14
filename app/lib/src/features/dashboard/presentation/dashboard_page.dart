@@ -17,6 +17,8 @@ import '../../products/application/low_stock_controller.dart';
 import '../../products/application/product_controller.dart';
 import '../../products/presentation/low_stock_page.dart';
 import '../../products/presentation/products_page.dart';
+import '../../users/application/users_controller.dart';
+import '../../users/presentation/users_page.dart';
 import '../application/dashboard_controller.dart';
 import '../application/dashboard_orders_controller.dart';
 import '../application/trend_controller.dart';
@@ -34,6 +36,7 @@ enum _QuickActionType {
   inbound,
   stockCheck,
   products,
+  users,
 }
 
 class _QuickActionItem {
@@ -73,6 +76,7 @@ class DashboardPage extends StatefulWidget {
     required this.stockCheckLogsController,
     required this.stockCheckController,
     required this.productController,
+    required this.usersController,
   });
 
   final SessionController sessionController;
@@ -87,6 +91,7 @@ class DashboardPage extends StatefulWidget {
   final StockCheckLogsController stockCheckLogsController;
   final StockCheckController stockCheckController;
   final ProductController productController;
+  final UsersController usersController;
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
@@ -247,6 +252,10 @@ class _DashboardPageState extends State<DashboardPage> {
           builder: (_) =>
               ProductsPage(controller: widget.productController),
         ));
+      case _QuickActionType.users:
+        Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => UsersPage(controller: widget.usersController),
+        ));
     }
   }
 
@@ -312,6 +321,16 @@ class _DashboardPageState extends State<DashboardPage> {
               subtitle: '建档/查询/维护',
               icon: Icons.inventory_2_rounded,
               color: Color(0xFF64748B),
+              enabled: true,
+            ),
+          // 人员管理 — OWNER 专属
+          if (role == UserRole.owner)
+            const _QuickActionItem(
+              type: _QuickActionType.users,
+              title: '人员管理',
+              subtitle: '添加员工 / 角色 / 密码',
+              icon: Icons.manage_accounts_rounded,
+              color: Color(0xFF8B5CF6),
               enabled: true,
             ),
         ];
