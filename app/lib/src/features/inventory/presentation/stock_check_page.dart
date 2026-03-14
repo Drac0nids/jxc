@@ -12,10 +12,13 @@ class StockCheckPage extends StatefulWidget {
     super.key,
     required this.controller,
     required this.logsController,
+    this.initialProductId,
   });
 
   final StockCheckController controller;
   final StockCheckLogsController logsController;
+  /// 预填的商品ID，从商品管理页跳转过来时使用
+  final int? initialProductId;
 
   @override
   State<StockCheckPage> createState() => _StockCheckPageState();
@@ -45,7 +48,14 @@ class _StockCheckPageState extends State<StockCheckPage> {
   @override
   void initState() {
     super.initState();
-    _createItemEditors.add(_createCreateItemEditor());
+    // 若有预填商品ID（从商品管理页跳入），直接填入第一行
+    final preId = widget.initialProductId;
+    _createItemEditors.add(
+      preId != null
+          ? _createCreateItemEditorFromInput(
+              StockCheckCreateItemInput(productId: preId.toString()))
+          : _createCreateItemEditor(),
+    );
   }
 
   @override

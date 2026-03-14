@@ -9,9 +9,15 @@ import '../models/product_models.dart';
 import 'products_edit_page.dart';
 
 class ProductsPage extends StatefulWidget {
-  const ProductsPage({super.key, required this.controller});
+  const ProductsPage({
+    super.key,
+    required this.controller,
+    this.onStockCheck,
+  });
 
   final ProductController controller;
+  /// 可选，传入则商品卡片显示「发起盘点」按鈕
+  final void Function(int productId)? onStockCheck;
 
   @override
   State<ProductsPage> createState() => _ProductsPageState();
@@ -280,6 +286,9 @@ class _ProductsPageState extends State<ProductsPage> {
                         busy: busy,
                         onEdit: () => _openEditPage(p),
                         onDelete: () => _deleteProduct(p),
+                        onStockCheck: widget.onStockCheck != null
+                            ? () => widget.onStockCheck!(p.id)
+                            : null,
                       ),
                     ),
                   ),
@@ -450,6 +459,7 @@ class _ProductCard extends StatelessWidget {
     required this.busy,
     required this.onEdit,
     required this.onDelete,
+    this.onStockCheck,
   });
 
   final ProductData product;
@@ -458,6 +468,8 @@ class _ProductCard extends StatelessWidget {
   final bool busy;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
+  /// 可选：点击「发起盘点」时调用
+  final VoidCallback? onStockCheck;
 
   @override
   Widget build(BuildContext context) {
@@ -768,6 +780,16 @@ class _ProductCard extends StatelessWidget {
                       label: const Text('编辑'),
                     ),
                     const SizedBox(width: 8),
+                    if (onStockCheck != null) ...<Widget>[
+                      OutlinedButton.icon(
+                        onPressed: busy ? null : onStockCheck,
+                        icon: const Icon(
+                            Icons.playlist_add_check_rounded,
+                            size: 16),
+                        label: const Text('发起盘点'),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
                     TextButton.icon(
                       onPressed: busy ? null : onDelete,
                       style: TextButton.styleFrom(
