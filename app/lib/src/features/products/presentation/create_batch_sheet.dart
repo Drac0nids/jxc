@@ -195,10 +195,10 @@ class _CreateBatchSheetState extends State<CreateBatchSheet> {
                       controller: _lotCtrl,
                       decoration: const InputDecoration(
                         labelText: '批次号（可选）',
-                        hintText: '留空则自动生成 YYYYMMDD-01',
+                        hintText: '如：20250315-01 或供应商批号',
                         prefixIcon: Icon(Icons.tag_rounded),
                         border: OutlineInputBorder(),
-                        helperText: '同天同商品第2批自动变 -02，以此类推',
+                        helperText: '留空自动生成 YYYYMMDD-01，同天第2批变 -02，以此类推',
                       ),
                     ),
                     const SizedBox(height: 12),
