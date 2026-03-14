@@ -29,4 +29,17 @@ enum UserRole {
         return 'UNKNOWN';
     }
   }
+
+  String get chineseLabel {
+    switch (this) {
+      case UserRole.owner:
+        return '老板';
+      case UserRole.purchaser:
+        return '采购员';
+      case UserRole.sales:
+        return '销售员';
+      case UserRole.unknown:
+        return '未知角色';
+    }
+  }
 }
