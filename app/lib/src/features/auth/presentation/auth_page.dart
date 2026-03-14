@@ -1,11 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
+import '../../../core/widgets/brand_ui.dart';
+import '../../../storage/session_storage.dart';
 import '../application/session_controller.dart';
 
 class AuthPage extends StatefulWidget {
-  const AuthPage({super.key, required this.sessionController});
+  const AuthPage({
+    super.key,
+    required this.sessionController,
+    required this.sessionStorage,
+  });
 
   final SessionController sessionController;
+  final SessionStorage sessionStorage;
 
   @override
   State<AuthPage> createState() => _AuthPageState();
@@ -13,14 +21,30 @@ class AuthPage extends StatefulWidget {
 
 class _AuthPageState extends State<AuthPage> {
   bool _isRegisterMode = false;
+  bool _obscurePassword = true;
 
+  final TextEditingController _tenantCodeController = TextEditingController();
   final TextEditingController _tenantNameController = TextEditingController();
-  final TextEditingController _usernameController = TextEditingController(text: 'admin');
+  final TextEditingController _usernameController =
+      TextEditingController(text: 'admin');
   final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _passwordController = TextEditingController(text: 'admin123');
+  final TextEditingController _passwordController =
+      TextEditingController(text: 'admin123');
+
+  @override
+  void initState() {
+    super.initState();
+    // 尝试从本地读取上次登录的租户码，自动填写
+    widget.sessionStorage.readTenantCode().then((code) {
+      if (code != null && mounted) {
+        _tenantCodeController.text = code;
+      }
+    });
+  }
 
   @override
   void dispose() {
+    _tenantCodeController.dispose();
     _tenantNameController.dispose();
     _usernameController.dispose();
     _nameController.dispose();
@@ -30,11 +54,13 @@ class _AuthPageState extends State<AuthPage> {
 
   @override
   Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final colorScheme = theme.colorScheme;
+
     return AnimatedBuilder(
       animation: widget.sessionController,
       builder: (BuildContext context, Widget? child) {
         return Scaffold(
-          appBar: AppBar(title: Text(_isRegisterMode ? '租户注册' : '登录系统')),
           body: SafeArea(
             child: Center(
               child: ConstrainedBox(
@@ -44,81 +70,153 @@ class _AuthPageState extends State<AuthPage> {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: <Widget>[
-                      SegmentedButton<bool>(
-                        segments: const <ButtonSegment<bool>>[
-                          ButtonSegment<bool>(value: false, label: Text('登录')),
-                          ButtonSegment<bool>(value: true, label: Text('注册')),
-                        ],
-                        selected: <bool>{_isRegisterMode},
-                        onSelectionChanged: widget.sessionController.submitting
-                            ? null
-                            : (Set<bool> value) {
-                                setState(() {
-                                  _isRegisterMode = value.first;
-                                });
-                                widget.sessionController.clearError();
-                              },
-                      ),
-                      const SizedBox(height: 16),
-                      if (_isRegisterMode) ...<Widget>[
-                        TextField(
-                          controller: _tenantNameController,
-                          decoration: const InputDecoration(
-                            labelText: '租户名称（可选）',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-                      TextField(
-                        controller: _usernameController,
-                        decoration: InputDecoration(
-                          labelText: _isRegisterMode ? 'Owner 登录用户名' : '用户名',
-                          border: const OutlineInputBorder(),
-                        ),
-                      ),
-                      if (_isRegisterMode) ...<Widget>[
-                        const SizedBox(height: 12),
-                        TextField(
-                          controller: _nameController,
-                          decoration: const InputDecoration(
-                            labelText: 'Owner 姓名',
-                            border: OutlineInputBorder(),
-                          ),
-                        ),
-                      ],
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: _passwordController,
-                        obscureText: true,
-                        decoration: const InputDecoration(
-                          labelText: '密码',
-                          border: OutlineInputBorder(),
+                      AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 220),
+                        child: BrandHeroBanner(
+                          key: ValueKey<bool>(_isRegisterMode),
+                          title: _isRegisterMode ? '创建你的进销存空间' : '欢迎使用极速云进销存',
+                          subtitle: _isRegisterMode
+                              ? '30 秒完成租户初始化并创建管理员账号'
+                              : '登录后继续今日经营与作业流程',
+                          icon: _isRegisterMode
+                              ? Icons.app_registration_rounded
+                              : Icons.inventory_2_rounded,
+                          gradientSeedColor: _isRegisterMode
+                              ? const Color(0xFF8B5CF6)
+                              : const Color(0xFF3B82F6),
                         ),
                       ),
                       const SizedBox(height: 16),
-                      FilledButton(
-                        onPressed: widget.sessionController.submitting ? null : _submit,
-                        child: Text(
-                          widget.sessionController.submitting
-                              ? (_isRegisterMode ? '注册中...' : '登录中...')
-                              : (_isRegisterMode ? '注册并登录' : '登录'),
+                      SectionCard(
+                        title: _isRegisterMode ? '租户注册' : '账号登录',
+                        subtitle: _isRegisterMode
+                            ? '先创建租户，再自动登录到系统'
+                            : '输入账号密码后进入经营看板',
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: <Widget>[
+                            SegmentedButton<bool>(
+                              segments: const <ButtonSegment<bool>>[
+                                ButtonSegment<bool>(
+                                    value: false, label: Text('登录')),
+                                ButtonSegment<bool>(
+                                    value: true, label: Text('注册')),
+                              ],
+                              selected: <bool>{_isRegisterMode},
+                              onSelectionChanged:
+                                  widget.sessionController.submitting
+                                      ? null
+                                      : (Set<bool> value) {
+                                          setState(() {
+                                            _isRegisterMode = value.first;
+                                          });
+                                          widget.sessionController.clearError();
+                                        },
+                            ),
+                            const SizedBox(height: 16),
+                            if (_isRegisterMode) ...<Widget>[
+                              TextField(
+                                controller: _tenantNameController,
+                                decoration: const InputDecoration(
+                                  labelText: '租户名称（可选）',
+                                ),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            // 租户码：登录模式农显示，注册模式隐藏
+                            if (!_isRegisterMode) ...<Widget>[
+                              TextField(
+                                controller: _tenantCodeController,
+                                textCapitalization: TextCapitalization.characters,
+                                inputFormatters: <TextInputFormatter>[
+                                  FilteringTextInputFormatter.allow(
+                                      RegExp('[A-Za-z0-9]')),
+                                  LengthLimitingTextInputFormatter(8),
+                                ],
+                                decoration: InputDecoration(
+                                  labelText: '租户码',
+                                  hintText: '上次登录后已自动记住',
+                                  prefixIcon: const Icon(Icons.domain_rounded),
+                                  helperText: '第一次登录后自动记住，屏幕左上角可看租户码',
+                                  suffixIcon: _tenantCodeController.text.isNotEmpty
+                                    ? null
+                                    : const Tooltip(
+                                        message: '直接点登录，不输租户码将按用户名全局查询（兼容旧版本）',
+                                        child: Icon(Icons.info_outline, size: 16),
+                                      ),
+                                ),
+                                onChanged: (_) => setState(() {}),
+                              ),
+                              const SizedBox(height: 12),
+                            ],
+                            TextField(
+                              controller: _usernameController,
+                              decoration: InputDecoration(
+                                labelText:
+                                    _isRegisterMode ? 'Owner 登录用户名' : '用户名',
+                              ),
+                            ),
+                            if (_isRegisterMode) ...<Widget>[
+                              const SizedBox(height: 12),
+                              TextField(
+                                controller: _nameController,
+                                decoration: const InputDecoration(
+                                  labelText: 'Owner 姓名',
+                                ),
+                              ),
+                            ],
+                            const SizedBox(height: 12),
+                            TextField(
+                              controller: _passwordController,
+                              obscureText: _obscurePassword,
+                              decoration: InputDecoration(
+                                labelText: '密码',
+                                suffixIcon: IconButton(
+                                  tooltip: _obscurePassword ? '显示密码' : '隐藏密码',
+                                  onPressed: () {
+                                    setState(() {
+                                      _obscurePassword = !_obscurePassword;
+                                    });
+                                  },
+                                  icon: Icon(
+                                    _obscurePassword
+                                        ? Icons.visibility_outlined
+                                        : Icons.visibility_off_outlined,
+                                  ),
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 16),
+                            FilledButton(
+                              onPressed: widget.sessionController.submitting
+                                  ? null
+                                  : _submit,
+                              child: Text(
+                                widget.sessionController.submitting
+                                    ? (_isRegisterMode ? '注册中...' : '登录中...')
+                                    : (_isRegisterMode ? '注册并登录' : '登录'),
+                              ),
+                            ),
+                            if (widget.sessionController.errorMessage !=
+                                null) ...<Widget>[
+                              const SizedBox(height: 12),
+                              StatusNotice(
+                                message: widget.sessionController.errorMessage!,
+                                tone: NoticeTone.error,
+                              ),
+                            ],
+                            if (!_isRegisterMode) ...<Widget>[
+                              const SizedBox(height: 10),
+                              Text(
+                                '演示账号：admin / admin123',
+                                style: theme.textTheme.bodySmall?.copyWith(
+                                  color: colorScheme.onSurfaceVariant,
+                                ),
+                              ),
+                            ],
+                          ],
                         ),
                       ),
-                      if (widget.sessionController.errorMessage != null) ...<Widget>[
-                        const SizedBox(height: 12),
-                        Text(
-                          widget.sessionController.errorMessage!,
-                          style: TextStyle(color: Theme.of(context).colorScheme.error),
-                        ),
-                      ],
-                      if (!_isRegisterMode) ...<Widget>[
-                        const SizedBox(height: 8),
-                        const Text(
-                          '演示账号：admin / admin123',
-                          style: TextStyle(fontSize: 12, color: Colors.black54),
-                        ),
-                      ],
                     ],
                   ),
                 ),
@@ -145,6 +243,7 @@ class _AuthPageState extends State<AuthPage> {
   Future<void> _submitLogin() async {
     final username = _usernameController.text.trim();
     final password = _passwordController.text;
+    final tenantCode = _tenantCodeController.text.trim();
 
     if (username.isEmpty || password.isEmpty) {
       _showMessage('请输入用户名和密码');
@@ -154,6 +253,7 @@ class _AuthPageState extends State<AuthPage> {
     await widget.sessionController.login(
       username: username,
       password: password,
+      tenantCode: tenantCode.isEmpty ? null : tenantCode.toUpperCase(),
     );
   }
 

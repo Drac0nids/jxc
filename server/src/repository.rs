@@ -11,9 +11,9 @@ use crate::{
     config::StorageBackend,
     error::AppError,
     models::{
-        AuditLog, Product, PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus, SalesOrder,
-        SalesOrderItem, SalesOrderStatus, StockCheck, StockCheckItem, StockCheckStatus, StockLog,
-        User, UserRole,
+        AuditLog, BarcodeLookupCache, BarcodeLookupStatus, Product, PurchaseOrder,
+        PurchaseOrderItem, PurchaseOrderStatus, SalesOrder, SalesOrderItem, SalesOrderStatus,
+        StockCheck, StockCheckItem, StockCheckStatus, StockLog, User, UserRole,
     },
 };
 
@@ -73,6 +73,32 @@ impl RepositoryProvider {
     ) -> Result<Option<User>, AppError> {
         match self {
             Self::Postgres(repo) => repo.find_user_by_id(pool, tenant_id, user_id).await,
+            Self::Memory(_) => Ok(None),
+        }
+    }
+
+    pub async fn create_tenant(
+        &self,
+        pool: Option<&PgPool>,
+        tenant: &crate::models::Tenant,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::Postgres(repo) => repo.create_tenant(pool, tenant).await,
+            Self::Memory(_) => Ok(()),
+        }
+    }
+
+    pub async fn find_user_by_tenant_code_and_username(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_code: &str,
+        username: &str,
+    ) -> Result<Option<User>, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.find_user_by_tenant_code_and_username(pool, tenant_code, username)
+                    .await
+            }
             Self::Memory(_) => Ok(None),
         }
     }
@@ -143,6 +169,31 @@ impl RepositoryProvider {
         }
     }
 
+    pub async fn find_barcode_lookup_cache(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        barcode: &str,
+    ) -> Result<Option<BarcodeLookupCache>, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.find_barcode_lookup_cache(pool, tenant_id, barcode).await
+            }
+            Self::Memory(_) => Ok(None),
+        }
+    }
+
+    pub async fn upsert_barcode_lookup_cache(
+        &self,
+        pool: Option<&PgPool>,
+        cache: &BarcodeLookupCache,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::Postgres(repo) => repo.upsert_barcode_lookup_cache(pool, cache).await,
+            Self::Memory(_) => Ok(()),
+        }
+    }
+
     pub async fn list_products_by_tenant(
         &self,
         pool: Option<&PgPool>,
@@ -172,6 +223,17 @@ impl RepositoryProvider {
     ) -> Result<Vec<SalesOrder>, AppError> {
         match self {
             Self::Postgres(repo) => repo.list_sales_orders_by_tenant(pool, tenant_id).await,
+            Self::Memory(_) => Ok(Vec::new()),
+        }
+    }
+
+    pub async fn list_purchase_orders_by_tenant(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+    ) -> Result<Vec<PurchaseOrder>, AppError> {
+        match self {
+            Self::Postgres(repo) => repo.list_purchase_orders_by_tenant(pool, tenant_id).await,
             Self::Memory(_) => Ok(Vec::new()),
         }
     }
@@ -283,7 +345,7 @@ impl RepositoryProvider {
         tenant_id: Uuid,
         product_id: i64,
         qty: i32,
-        unit_cost: Decimal,
+        unit_cost: Option<Decimal>,
         expected_version: Option<i32>,
         biz_no: &str,
         operator_id: Uuid,
@@ -307,13 +369,31 @@ impl RepositoryProvider {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub async fn inbound_batch(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        biz_no: &str,
+        items: &[(i64, i32, Option<Decimal>, Option<i32>)],
+        operator_id: Uuid,
+    ) -> Result<Vec<Product>, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.inbound_batch(pool, tenant_id, biz_no, items, operator_id)
+                    .await
+            }
+            Self::Memory(_) => Err(unsupported_operation("inbound_batch")),
+        }
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn outbound(
         &self,
         pool: Option<&PgPool>,
         tenant_id: Uuid,
         biz_no: &str,
         default_expected_version: Option<i32>,
-        items: &[(i64, i32, Option<i32>)],
+        items: &[(i64, i32, Option<i32>, Option<Decimal>)],
         allow_negative_stock: bool,
         operator_id: Uuid,
     ) -> Result<Vec<Product>, AppError> {
@@ -791,6 +871,79 @@ impl PostgresRepository {
         }))
     }
 
+    pub async fn create_tenant(
+        &self,
+        pool: Option<&PgPool>,
+        tenant: &crate::models::Tenant,
+    ) -> Result<(), AppError> {
+        let pool = require_pool(pool)?;
+        sqlx::query(
+            r#"
+            INSERT INTO tenants (id, code, name)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (id) DO NOTHING
+            "#,
+        )
+        .bind(tenant.id)
+        .bind(&tenant.code)
+        .bind(&tenant.name)
+        .execute(pool)
+        .await
+        .map_err(|err| map_sqlx_error("创建租户失败", err))?;
+        Ok(())
+    }
+
+    /// 通过 tenant_code + username 找用户（供租户码登录使用）
+    pub async fn find_user_by_tenant_code_and_username(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_code: &str,
+        username: &str,
+    ) -> Result<Option<User>, AppError> {
+        let pool = require_pool(pool)?;
+        let row = sqlx::query(
+            r#"
+            SELECT u.id, u.tenant_id, u.username, u.name, u.role, u.password_hash
+            FROM users u
+            JOIN tenants t ON u.tenant_id = t.id
+            WHERE UPPER(t.code) = UPPER($1) AND u.username = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_code)
+        .bind(username)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| map_sqlx_error("按租户码查询用户失败", err))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let role_raw: String = row
+            .try_get("role")
+            .map_err(|err| map_sqlx_error("读取用户角色失败", err))?;
+
+        Ok(Some(User {
+            id: row
+                .try_get("id")
+                .map_err(|err| map_sqlx_error("读取用户ID失败", err))?,
+            tenant_id: row
+                .try_get("tenant_id")
+                .map_err(|err| map_sqlx_error("读取租户ID失败", err))?,
+            username: row
+                .try_get("username")
+                .map_err(|err| map_sqlx_error("读取用户名失败", err))?,
+            name: row
+                .try_get("name")
+                .map_err(|err| map_sqlx_error("读取姓名失败", err))?,
+            role: parse_user_role(&role_raw)?,
+            password_hash: row
+                .try_get("password_hash")
+                .map_err(|err| map_sqlx_error("读取密码摘要失败", err))?,
+        }))
+    }
+
     pub async fn list_users_by_tenant(
         &self,
         pool: Option<&PgPool>,
@@ -935,7 +1088,7 @@ impl PostgresRepository {
             sqlx::query(
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
-                       current_stock, cost_price, retail_price, wholesale_price,
+                       current_stock, cost_price, retail_price, last_inbound_unit_cost,
                        min_stock_limit, version, is_deleted
                 FROM products
                 WHERE tenant_id = $1 AND barcode = $2
@@ -951,7 +1104,7 @@ impl PostgresRepository {
             sqlx::query(
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
-                       current_stock, cost_price, retail_price, wholesale_price,
+                       current_stock, cost_price, retail_price, last_inbound_unit_cost,
                        min_stock_limit, version, is_deleted
                 FROM products
                 WHERE tenant_id = $1 AND barcode = $2 AND is_deleted = FALSE
@@ -968,6 +1121,91 @@ impl PostgresRepository {
         row.map(map_product_row).transpose()
     }
 
+    pub async fn find_barcode_lookup_cache(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        barcode: &str,
+    ) -> Result<Option<BarcodeLookupCache>, AppError> {
+        let pool = require_pool(pool)?;
+        let row = sqlx::query(
+            r#"
+            SELECT tenant_id, barcode, lookup_status, product_name, raw_payload, expires_at, updated_at
+            FROM barcode_lookup_cache
+            WHERE tenant_id = $1 AND barcode = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(barcode)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| map_sqlx_error("查询条码缓存失败", err))?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        let lookup_status_raw: String = row
+            .try_get("lookup_status")
+            .map_err(|err| map_sqlx_error("读取条码缓存状态失败", err))?;
+
+        Ok(Some(BarcodeLookupCache {
+            tenant_id: row
+                .try_get("tenant_id")
+                .map_err(|err| map_sqlx_error("读取条码缓存租户ID失败", err))?,
+            barcode: row
+                .try_get("barcode")
+                .map_err(|err| map_sqlx_error("读取条码缓存条码失败", err))?,
+            lookup_status: parse_barcode_lookup_status(&lookup_status_raw)?,
+            product_name: row
+                .try_get("product_name")
+                .map_err(|err| map_sqlx_error("读取条码缓存商品名失败", err))?,
+            raw_payload: row
+                .try_get("raw_payload")
+                .map_err(|err| map_sqlx_error("读取条码缓存原始响应失败", err))?,
+            expires_at: row
+                .try_get("expires_at")
+                .map_err(|err| map_sqlx_error("读取条码缓存过期时间失败", err))?,
+            updated_at: row
+                .try_get("updated_at")
+                .map_err(|err| map_sqlx_error("读取条码缓存更新时间失败", err))?,
+        }))
+    }
+
+    pub async fn upsert_barcode_lookup_cache(
+        &self,
+        pool: Option<&PgPool>,
+        cache: &BarcodeLookupCache,
+    ) -> Result<(), AppError> {
+        let pool = require_pool(pool)?;
+        sqlx::query(
+            r#"
+            INSERT INTO barcode_lookup_cache (
+                tenant_id, barcode, lookup_status, product_name, raw_payload, expires_at, updated_at
+            )
+            VALUES ($1, $2, $3, $4, $5, $6, NOW())
+            ON CONFLICT (tenant_id, barcode)
+            DO UPDATE SET lookup_status = EXCLUDED.lookup_status,
+                          product_name = EXCLUDED.product_name,
+                          raw_payload = EXCLUDED.raw_payload,
+                          expires_at = EXCLUDED.expires_at,
+                          updated_at = NOW()
+            "#,
+        )
+        .bind(cache.tenant_id)
+        .bind(&cache.barcode)
+        .bind(cache.lookup_status.as_str())
+        .bind(&cache.product_name)
+        .bind(&cache.raw_payload)
+        .bind(cache.expires_at)
+        .execute(pool)
+        .await
+        .map_err(|err| map_sqlx_error("写入条码缓存失败", err))?;
+
+        Ok(())
+    }
+
     pub async fn list_products_by_tenant(
         &self,
         pool: Option<&PgPool>,
@@ -977,7 +1215,7 @@ impl PostgresRepository {
         let rows = sqlx::query(
             r#"
             SELECT id, tenant_id, sku, barcode, name, unit,
-                   current_stock, cost_price, retail_price, wholesale_price,
+                   current_stock, cost_price, retail_price, last_inbound_unit_cost,
                    min_stock_limit, version, is_deleted
             FROM products
             WHERE tenant_id = $1 AND is_deleted = FALSE
@@ -1001,7 +1239,7 @@ impl PostgresRepository {
         let rows = sqlx::query(
             r#"
             SELECT id, tenant_id, sku, barcode, name, unit,
-                   current_stock, cost_price, retail_price, wholesale_price,
+                   current_stock, cost_price, retail_price, last_inbound_unit_cost,
                    min_stock_limit, version, is_deleted
             FROM products
             WHERE tenant_id = $1
@@ -1045,7 +1283,7 @@ impl PostgresRepository {
 
         let item_rows = sqlx::query(
             r#"
-            SELECT sales_order_id, product_id, qty, sell_price, returned_qty
+            SELECT sales_order_id, product_id, qty, sell_price, returned_qty, product_name_snapshot
             FROM sales_order_items
             WHERE tenant_id = $1
             ORDER BY sales_order_id ASC, id ASC
@@ -1077,6 +1315,9 @@ impl PostgresRepository {
                     returned_qty: item_row
                         .try_get("returned_qty")
                         .map_err(|err| map_sqlx_error("读取销售明细已退数量失败", err))?,
+                    product_name_snapshot: item_row
+                        .try_get("product_name_snapshot")
+                        .map_err(|err| map_sqlx_error("读取销售明细商品名称快照失败", err))?,
                 });
         }
 
@@ -1144,6 +1385,128 @@ impl PostgresRepository {
         Ok(orders)
     }
 
+    pub async fn list_purchase_orders_by_tenant(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+    ) -> Result<Vec<PurchaseOrder>, AppError> {
+        let pool = require_pool(pool)?;
+
+        let order_rows = sqlx::query(
+            r#"
+            SELECT id, tenant_id, biz_no, supplier_id,
+                   status, remark, created_by,
+                   version, confirmed_at, voided_at,
+                   created_at, updated_at
+            FROM purchase_orders
+            WHERE tenant_id = $1
+            ORDER BY id ASC
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| map_sqlx_error("查询采购单列表失败", err))?;
+
+        if order_rows.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let item_rows = sqlx::query(
+            r#"
+            SELECT purchase_order_id, product_id, qty, unit_cost, product_name_snapshot
+            FROM purchase_order_items
+            WHERE tenant_id = $1
+            ORDER BY purchase_order_id ASC, id ASC
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| map_sqlx_error("查询采购单明细列表失败", err))?;
+
+        let mut items_by_order: HashMap<i64, Vec<PurchaseOrderItem>> = HashMap::new();
+        for item_row in item_rows {
+            let order_id: i64 = item_row
+                .try_get("purchase_order_id")
+                .map_err(|err| map_sqlx_error("读取采购单ID失败", err))?;
+            items_by_order
+                .entry(order_id)
+                .or_default()
+                .push(PurchaseOrderItem {
+                    product_id: item_row
+                        .try_get("product_id")
+                        .map_err(|err| map_sqlx_error("读取采购明细商品ID失败", err))?,
+                    qty: item_row
+                        .try_get("qty")
+                        .map_err(|err| map_sqlx_error("读取采购明细数量失败", err))?,
+                    unit_cost: item_row
+                        .try_get("unit_cost")
+                        .map_err(|err| map_sqlx_error("读取采购明细单价失败", err))?,
+                    product_name_snapshot: item_row
+                        .try_get("product_name_snapshot")
+                        .map_err(|err| map_sqlx_error("读取采购明细商品名称快照失败", err))?,
+                });
+        }
+
+        let mut orders = Vec::with_capacity(order_rows.len());
+        for row in order_rows {
+            let order_id: i64 = row
+                .try_get("id")
+                .map_err(|err| map_sqlx_error("读取采购单ID失败", err))?;
+            let status_raw: String = row
+                .try_get("status")
+                .map_err(|err| map_sqlx_error("读取采购单状态失败", err))?;
+
+            let confirmed_at = row
+                .try_get::<Option<DateTime<Utc>>, _>("confirmed_at")
+                .map_err(|err| map_sqlx_error("读取确认时间失败", err))?
+                .map(|dt| dt.to_rfc3339());
+            let voided_at = row
+                .try_get::<Option<DateTime<Utc>>, _>("voided_at")
+                .map_err(|err| map_sqlx_error("读取作废时间失败", err))?
+                .map(|dt| dt.to_rfc3339());
+            let created_at = row
+                .try_get::<DateTime<Utc>, _>("created_at")
+                .map_err(|err| map_sqlx_error("读取创建时间失败", err))?
+                .to_rfc3339();
+            let updated_at = row
+                .try_get::<DateTime<Utc>, _>("updated_at")
+                .map_err(|err| map_sqlx_error("读取更新时间失败", err))?
+                .to_rfc3339();
+
+            orders.push(PurchaseOrder {
+                id: order_id,
+                tenant_id: row
+                    .try_get("tenant_id")
+                    .map_err(|err| map_sqlx_error("读取租户ID失败", err))?,
+                biz_no: row
+                    .try_get("biz_no")
+                    .map_err(|err| map_sqlx_error("读取采购单号失败", err))?,
+                supplier_id: row
+                    .try_get("supplier_id")
+                    .map_err(|err| map_sqlx_error("读取供应商ID失败", err))?,
+                status: parse_purchase_order_status(&status_raw)?,
+                items: items_by_order.remove(&order_id).unwrap_or_default(),
+                remark: row
+                    .try_get("remark")
+                    .map_err(|err| map_sqlx_error("读取备注失败", err))?,
+                created_by: row
+                    .try_get("created_by")
+                    .map_err(|err| map_sqlx_error("读取创建人失败", err))?,
+                version: row
+                    .try_get("version")
+                    .map_err(|err| map_sqlx_error("读取版本失败", err))?,
+                confirmed_at,
+                voided_at,
+                created_at,
+                updated_at,
+            });
+        }
+
+        Ok(orders)
+    }
+
     pub async fn list_stock_logs_by_tenant(
         &self,
         pool: Option<&PgPool>,
@@ -1153,7 +1516,7 @@ impl PostgresRepository {
         let rows = sqlx::query(
             r#"
             SELECT id, tenant_id, product_id, biz_type, biz_no,
-                   delta_qty, snapshot_stock, snapshot_cost, operator_id, created_at
+                   delta_qty, snapshot_stock, snapshot_cost, snapshot_sell_price, snapshot_inbound_unit_cost, operator_id, created_at
             FROM stock_logs
             WHERE tenant_id = $1
             ORDER BY id ASC
@@ -1191,6 +1554,12 @@ impl PostgresRepository {
                 snapshot_cost: row
                     .try_get("snapshot_cost")
                     .map_err(|err| map_sqlx_error("读取快照成本失败", err))?,
+                snapshot_sell_price: row
+                    .try_get("snapshot_sell_price")
+                    .map_err(|err| map_sqlx_error("读取快照售价失败", err))?,
+                snapshot_inbound_unit_cost: row
+                    .try_get("snapshot_inbound_unit_cost")
+                    .map_err(|err| map_sqlx_error("读取入库进价快照失败", err))?,
                 operator_id: row
                     .try_get("operator_id")
                     .map_err(|err| map_sqlx_error("读取操作人失败", err))?,
@@ -1276,7 +1645,7 @@ impl PostgresRepository {
             sqlx::query(
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
-                       current_stock, cost_price, retail_price, wholesale_price,
+                       current_stock, cost_price, retail_price, last_inbound_unit_cost,
                        min_stock_limit, version, is_deleted
                 FROM products
                 WHERE tenant_id = $1 AND id = $2
@@ -1292,7 +1661,7 @@ impl PostgresRepository {
             sqlx::query(
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
-                       current_stock, cost_price, retail_price, wholesale_price,
+                       current_stock, cost_price, retail_price, last_inbound_unit_cost,
                        min_stock_limit, version, is_deleted
                 FROM products
                 WHERE tenant_id = $1 AND id = $2 AND is_deleted = FALSE
@@ -1428,7 +1797,7 @@ impl PostgresRepository {
             r#"
             INSERT INTO products (
                 id, tenant_id, sku, barcode, name, unit,
-                current_stock, cost_price, retail_price, wholesale_price,
+                current_stock, cost_price, retail_price, last_inbound_unit_cost,
                 min_stock_limit, version, is_deleted, created_at, updated_at
             )
             VALUES (
@@ -1447,7 +1816,7 @@ impl PostgresRepository {
         .bind(product.current_stock)
         .bind(product.cost_price)
         .bind(product.retail_price)
-        .bind(product.wholesale_price)
+        .bind(product.last_inbound_unit_cost)
         .bind(product.min_stock_limit)
         .bind(product.version)
         .bind(product.is_deleted)
@@ -1476,7 +1845,7 @@ impl PostgresRepository {
                     current_stock = $5,
                     cost_price = $6,
                     retail_price = $7,
-                    wholesale_price = $8,
+                    last_inbound_unit_cost = $8,
                     min_stock_limit = $9,
                     version = $10,
                     is_deleted = $11,
@@ -1493,7 +1862,7 @@ impl PostgresRepository {
             .bind(product.current_stock)
             .bind(product.cost_price)
             .bind(product.retail_price)
-            .bind(product.wholesale_price)
+            .bind(product.last_inbound_unit_cost)
             .bind(product.min_stock_limit)
             .bind(product.version)
             .bind(product.is_deleted)
@@ -1514,7 +1883,7 @@ impl PostgresRepository {
                     current_stock = $5,
                     cost_price = $6,
                     retail_price = $7,
-                    wholesale_price = $8,
+                    last_inbound_unit_cost = $8,
                     min_stock_limit = $9,
                     version = $10,
                     is_deleted = $11,
@@ -1530,7 +1899,7 @@ impl PostgresRepository {
             .bind(product.current_stock)
             .bind(product.cost_price)
             .bind(product.retail_price)
-            .bind(product.wholesale_price)
+            .bind(product.last_inbound_unit_cost)
             .bind(product.min_stock_limit)
             .bind(product.version)
             .bind(product.is_deleted)
@@ -1575,7 +1944,7 @@ impl PostgresRepository {
         tenant_id: Uuid,
         product_id: i64,
         qty: i32,
-        unit_cost: Decimal,
+        unit_cost: Option<Decimal>,
         expected_version: Option<i32>,
         biz_no: &str,
         operator_id: Uuid,
@@ -1593,7 +1962,7 @@ impl PostgresRepository {
         let row = sqlx::query(
             r#"
             SELECT id, tenant_id, sku, barcode, name, unit,
-                   current_stock, cost_price, retail_price, wholesale_price,
+                   current_stock, cost_price, retail_price, last_inbound_unit_cost,
                    min_stock_limit, version, is_deleted
             FROM products
             WHERE tenant_id = $1 AND id = $2
@@ -1628,17 +1997,21 @@ impl PostgresRepository {
 
         let old_stock = existing.current_stock;
         let old_cost = existing.cost_price;
+        let effective_unit_cost = unit_cost
+            .or(existing.last_inbound_unit_cost)
+            .unwrap_or(old_cost);
         let new_stock = old_stock + qty;
         let new_cost = if new_stock <= 0 {
-            unit_cost.round_dp(4)
+            effective_unit_cost.round_dp(4)
         } else {
             let old_total = old_cost * Decimal::from(old_stock);
-            let in_total = unit_cost * Decimal::from(qty);
+            let in_total = effective_unit_cost * Decimal::from(qty);
             ((old_total + in_total) / Decimal::from(new_stock)).round_dp(4)
         };
 
         existing.current_stock = new_stock;
         existing.cost_price = new_cost;
+        existing.last_inbound_unit_cost = Some(effective_unit_cost.round_dp(4));
         existing.version += 1;
 
         sqlx::query(
@@ -1646,13 +2019,15 @@ impl PostgresRepository {
             UPDATE products
             SET current_stock = $1,
                 cost_price = $2,
-                version = $3,
+                last_inbound_unit_cost = $3,
+                version = $4,
                 updated_at = NOW()
-            WHERE tenant_id = $4 AND id = $5
+            WHERE tenant_id = $5 AND id = $6
             "#,
         )
         .bind(existing.current_stock)
         .bind(existing.cost_price)
+        .bind(existing.last_inbound_unit_cost)
         .bind(existing.version)
         .bind(tenant_id)
         .bind(product_id)
@@ -1665,9 +2040,9 @@ impl PostgresRepository {
             r#"
             INSERT INTO stock_logs (
                 id, tenant_id, product_id, biz_type, biz_no,
-                delta_qty, snapshot_stock, snapshot_cost, operator_id, created_at
+                delta_qty, snapshot_stock, snapshot_cost, snapshot_sell_price, snapshot_inbound_unit_cost, operator_id, created_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
             "#,
         )
         .bind(stock_log_id)
@@ -1678,6 +2053,8 @@ impl PostgresRepository {
         .bind(qty)
         .bind(existing.current_stock)
         .bind(existing.cost_price)
+        .bind(Option::<Decimal>::None)
+        .bind(Some(effective_unit_cost))
         .bind(operator_id)
         .execute(&mut *tx)
         .await
@@ -1691,13 +2068,151 @@ impl PostgresRepository {
     }
 
     #[allow(clippy::too_many_arguments)]
+    pub async fn inbound_batch(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        biz_no: &str,
+        items: &[(i64, i32, Option<Decimal>, Option<i32>)],
+        operator_id: Uuid,
+    ) -> Result<Vec<Product>, AppError> {
+        if items.is_empty() {
+            return Err(AppError::bad_request("items 不能为空"));
+        }
+
+        let pool = require_pool(pool)?;
+        let mut tx = pool
+            .begin()
+            .await
+            .map_err(|err| map_sqlx_error("批量入库事务开启失败", err))?;
+
+        let mut next_stock_log_id = self.next_stock_log_id_in_tx(&mut tx).await?;
+        let mut updated_products = Vec::with_capacity(items.len());
+
+        for &(product_id, qty, unit_cost, expected_version) in items {
+            if qty <= 0 {
+                return Err(AppError::bad_request("items.qty 必须大于 0"));
+            }
+
+            let row = sqlx::query(
+                r#"
+                SELECT id, tenant_id, sku, barcode, name, unit,
+                       current_stock, cost_price, retail_price, last_inbound_unit_cost,
+                       min_stock_limit, version, is_deleted
+                FROM products
+                WHERE tenant_id = $1 AND id = $2
+                FOR UPDATE
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(product_id)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|err| map_sqlx_error("锁定商品失败", err))?
+            .ok_or_else(|| AppError::not_found("商品不存在"))?;
+
+            let mut existing = map_product_row(row)?;
+            if existing.is_deleted {
+                return Err(AppError::not_found("商品不存在"));
+            }
+
+            if let Some(ev) = expected_version
+                && ev != existing.version
+            {
+                return Err(
+                    AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
+                        "resource": "product",
+                        "resource_id": existing.id,
+                        "expected_version": ev,
+                        "current_version": existing.version,
+                        "latest_snapshot": product_snapshot(&existing)
+                    })),
+                );
+            }
+
+            let old_stock = existing.current_stock;
+            let old_cost = existing.cost_price;
+            let effective_unit_cost = unit_cost
+                .or(existing.last_inbound_unit_cost)
+                .unwrap_or(old_cost);
+            let new_stock = old_stock + qty;
+            let new_cost = if new_stock <= 0 {
+                effective_unit_cost.round_dp(4)
+            } else {
+                let old_total = old_cost * Decimal::from(old_stock);
+                let in_total = effective_unit_cost * Decimal::from(qty);
+                ((old_total + in_total) / Decimal::from(new_stock)).round_dp(4)
+            };
+
+            existing.current_stock = new_stock;
+            existing.cost_price = new_cost;
+            existing.last_inbound_unit_cost = Some(effective_unit_cost.round_dp(4));
+            existing.version += 1;
+
+            sqlx::query(
+                r#"
+                UPDATE products
+                SET current_stock = $1,
+                    cost_price = $2,
+                    last_inbound_unit_cost = $3,
+                    version = $4,
+                    updated_at = NOW()
+                WHERE tenant_id = $5 AND id = $6
+                "#,
+            )
+            .bind(existing.current_stock)
+            .bind(existing.cost_price)
+            .bind(existing.last_inbound_unit_cost)
+            .bind(existing.version)
+            .bind(tenant_id)
+            .bind(product_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| map_sqlx_error("更新商品库存失败", err))?;
+
+            sqlx::query(
+                r#"
+                INSERT INTO stock_logs (
+                    id, tenant_id, product_id, biz_type, biz_no,
+                    delta_qty, snapshot_stock, snapshot_cost, snapshot_sell_price, snapshot_inbound_unit_cost, operator_id, created_at
+                )
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
+                "#,
+            )
+            .bind(next_stock_log_id)
+            .bind(tenant_id)
+            .bind(existing.id)
+            .bind("IN_PURCHASE")
+            .bind(biz_no)
+            .bind(qty)
+            .bind(existing.current_stock)
+            .bind(existing.cost_price)
+            .bind(Option::<Decimal>::None)
+            .bind(Some(effective_unit_cost))
+            .bind(operator_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|err| map_sqlx_error("写入库存流水失败", err))?;
+
+            next_stock_log_id += 1;
+            updated_products.push(existing);
+        }
+
+        tx.commit()
+            .await
+            .map_err(|err| map_sqlx_error("批量入库事务提交失败", err))?;
+
+        Ok(updated_products)
+    }
+
+    #[allow(clippy::too_many_arguments)]
     pub async fn outbound(
         &self,
         pool: Option<&PgPool>,
         tenant_id: Uuid,
         biz_no: &str,
         default_expected_version: Option<i32>,
-        items: &[(i64, i32, Option<i32>)],
+        items: &[(i64, i32, Option<i32>, Option<Decimal>)],
         allow_negative_stock: bool,
         operator_id: Uuid,
     ) -> Result<Vec<Product>, AppError> {
@@ -1714,7 +2229,7 @@ impl PostgresRepository {
         let mut next_stock_log_id = self.next_stock_log_id_in_tx(&mut tx).await?;
         let mut updated_products = Vec::with_capacity(items.len());
 
-        for &(product_id, qty, item_expected_version) in items {
+        for &(product_id, qty, item_expected_version, snapshot_sell_price) in items {
             if qty <= 0 {
                 return Err(AppError::bad_request("items.qty 必须大于 0"));
             }
@@ -1722,7 +2237,7 @@ impl PostgresRepository {
             let row = sqlx::query(
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
-                       current_stock, cost_price, retail_price, wholesale_price,
+                       current_stock, cost_price, retail_price, last_inbound_unit_cost,
                        min_stock_limit, version, is_deleted
                 FROM products
                 WHERE tenant_id = $1 AND id = $2
@@ -1792,9 +2307,9 @@ impl PostgresRepository {
                 r#"
                 INSERT INTO stock_logs (
                     id, tenant_id, product_id, biz_type, biz_no,
-                    delta_qty, snapshot_stock, snapshot_cost, operator_id, created_at
+                    delta_qty, snapshot_stock, snapshot_cost, snapshot_sell_price, snapshot_inbound_unit_cost, operator_id, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
                 "#,
             )
             .bind(next_stock_log_id)
@@ -1805,6 +2320,8 @@ impl PostgresRepository {
             .bind(-qty)
             .bind(existing.current_stock)
             .bind(existing.cost_price)
+            .bind(snapshot_sell_price)
+            .bind(Option::<Decimal>::None)
             .bind(operator_id)
             .execute(&mut *tx)
             .await
@@ -1971,9 +2488,9 @@ impl PostgresRepository {
             let item_insert = sqlx::query(
                 r#"
                 INSERT INTO purchase_order_items (
-                    tenant_id, purchase_order_id, product_id, qty, unit_cost, created_at
+                    tenant_id, purchase_order_id, product_id, qty, unit_cost, product_name_snapshot, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, NOW())
                 "#,
             )
             .bind(order.tenant_id)
@@ -1981,6 +2498,7 @@ impl PostgresRepository {
             .bind(item.product_id)
             .bind(item.qty)
             .bind(item.unit_cost)
+            .bind(&item.product_name_snapshot)
             .execute(&mut *tx)
             .await;
 
@@ -2033,7 +2551,7 @@ impl PostgresRepository {
 
         let items_rows = sqlx::query(
             r#"
-            SELECT product_id, qty, unit_cost
+            SELECT product_id, qty, unit_cost, product_name_snapshot
             FROM purchase_order_items
             WHERE tenant_id = $1 AND purchase_order_id = $2
             ORDER BY id ASC
@@ -2057,6 +2575,9 @@ impl PostgresRepository {
                 unit_cost: item_row
                     .try_get("unit_cost")
                     .map_err(|err| map_sqlx_error("读取采购明细单价失败", err))?,
+                product_name_snapshot: item_row
+                    .try_get("product_name_snapshot")
+                    .map_err(|err| map_sqlx_error("读取采购明细商品名称快照失败", err))?,
             });
         }
 
@@ -2201,13 +2722,15 @@ impl PostgresRepository {
                 UPDATE products
                 SET current_stock = $1,
                     cost_price = $2,
-                    version = $3,
+                    last_inbound_unit_cost = $3,
+                    version = $4,
                     updated_at = NOW()
-                WHERE tenant_id = $4 AND id = $5
+                WHERE tenant_id = $5 AND id = $6
                 "#,
             )
             .bind(new_stock)
             .bind(new_cost)
+            .bind(Some(item.unit_cost.round_dp(4)))
             .bind(old_version + 1)
             .bind(tenant_id)
             .bind(product_id)
@@ -2219,9 +2742,9 @@ impl PostgresRepository {
                 r#"
                 INSERT INTO stock_logs (
                     id, tenant_id, product_id, biz_type, biz_no,
-                    delta_qty, snapshot_stock, snapshot_cost, operator_id, created_at
+                    delta_qty, snapshot_stock, snapshot_cost, snapshot_sell_price, snapshot_inbound_unit_cost, operator_id, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
                 "#,
             )
             .bind(next_stock_log_id)
@@ -2232,6 +2755,8 @@ impl PostgresRepository {
             .bind(item.qty)
             .bind(new_stock)
             .bind(new_cost)
+            .bind(Option::<Decimal>::None)
+            .bind(Some(item.unit_cost))
             .bind(operator_id)
             .execute(&mut *tx)
             .await
@@ -2526,9 +3051,9 @@ impl PostgresRepository {
                 r#"
                 INSERT INTO stock_logs (
                     id, tenant_id, product_id, biz_type, biz_no,
-                    delta_qty, snapshot_stock, snapshot_cost, operator_id, created_at
+                    delta_qty, snapshot_stock, snapshot_cost, snapshot_sell_price, snapshot_inbound_unit_cost, operator_id, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
                 "#,
             )
             .bind(next_stock_log_id)
@@ -2539,6 +3064,14 @@ impl PostgresRepository {
             .bind(qty)
             .bind(new_stock)
             .bind(snapshot_cost)
+            .bind(
+                existing
+                    .items
+                    .iter()
+                    .find(|item| item.product_id == product_id)
+                    .map(|item| item.sell_price),
+            )
+            .bind(Option::<Decimal>::None)
             .bind(operator_id)
             .execute(&mut *tx)
             .await
@@ -3121,9 +3654,9 @@ impl PostgresRepository {
                     r#"
                     INSERT INTO stock_logs (
                         id, tenant_id, product_id, biz_type, biz_no,
-                        delta_qty, snapshot_stock, snapshot_cost, operator_id, created_at
+                        delta_qty, snapshot_stock, snapshot_cost, snapshot_sell_price, snapshot_inbound_unit_cost, operator_id, created_at
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
                     "#,
                 )
                 .bind(next_stock_log_id)
@@ -3134,6 +3667,8 @@ impl PostgresRepository {
                 .bind(delta_qty)
                 .bind(actual_stock)
                 .bind(snapshot_cost)
+                .bind(Option::<Decimal>::None)
+                .bind(Option::<Decimal>::None)
                 .bind(operator_id)
                 .execute(&mut *tx)
                 .await
@@ -3371,7 +3906,7 @@ impl PostgresRepository {
             .map_err(|err| map_sqlx_error("读取销售单状态失败", err))?;
         let items_rows = sqlx::query(
             r#"
-            SELECT product_id, qty, sell_price, returned_qty
+            SELECT product_id, qty, sell_price, returned_qty, product_name_snapshot
             FROM sales_order_items
             WHERE tenant_id = $1 AND sales_order_id = $2
             ORDER BY id ASC
@@ -3398,6 +3933,9 @@ impl PostgresRepository {
                 returned_qty: item_row
                     .try_get("returned_qty")
                     .map_err(|err| map_sqlx_error("读取销售明细已退数量失败", err))?,
+                product_name_snapshot: item_row
+                    .try_get("product_name_snapshot")
+                    .map_err(|err| map_sqlx_error("读取销售明细商品名称快照失败", err))?,
             });
         }
 
@@ -3570,9 +4108,9 @@ impl PostgresRepository {
                     r#"
                     INSERT INTO stock_logs (
                         id, tenant_id, product_id, biz_type, biz_no,
-                        delta_qty, snapshot_stock, snapshot_cost, operator_id, created_at
+                        delta_qty, snapshot_stock, snapshot_cost, snapshot_sell_price, snapshot_inbound_unit_cost, operator_id, created_at
                     )
-                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
                     "#,
                 )
                 .bind(next_stock_log_id)
@@ -3583,6 +4121,8 @@ impl PostgresRepository {
                 .bind(-item.qty)
                 .bind(new_stock)
                 .bind(snapshot_cost)
+                .bind(Option::<Decimal>::None)
+                .bind(Option::<Decimal>::None)
                 .bind(operator_id)
                 .execute(&mut *tx)
                 .await
@@ -3738,9 +4278,9 @@ impl PostgresRepository {
             let item_insert = sqlx::query(
                 r#"
                 INSERT INTO sales_order_items (
-                    tenant_id, sales_order_id, product_id, qty, sell_price, returned_qty, created_at
+                    tenant_id, sales_order_id, product_id, qty, sell_price, returned_qty, product_name_snapshot, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, NOW())
+                VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
                 "#,
             )
             .bind(order.tenant_id)
@@ -3749,6 +4289,7 @@ impl PostgresRepository {
             .bind(item.qty)
             .bind(item.sell_price)
             .bind(item.returned_qty)
+            .bind(&item.product_name_snapshot)
             .execute(&mut *tx)
             .await;
 
@@ -3801,7 +4342,7 @@ impl PostgresRepository {
 
         let items_rows = sqlx::query(
             r#"
-            SELECT product_id, qty, sell_price, returned_qty
+            SELECT product_id, qty, sell_price, returned_qty, product_name_snapshot
             FROM sales_order_items
             WHERE tenant_id = $1 AND sales_order_id = $2
             ORDER BY id ASC
@@ -3828,6 +4369,9 @@ impl PostgresRepository {
                 returned_qty: item_row
                     .try_get("returned_qty")
                     .map_err(|err| map_sqlx_error("读取销售明细已退数量失败", err))?,
+                product_name_snapshot: item_row
+                    .try_get("product_name_snapshot")
+                    .map_err(|err| map_sqlx_error("读取销售明细商品名称快照失败", err))?,
             });
         }
 
@@ -3999,9 +4543,9 @@ impl PostgresRepository {
                 r#"
                 INSERT INTO stock_logs (
                     id, tenant_id, product_id, biz_type, biz_no,
-                    delta_qty, snapshot_stock, snapshot_cost, operator_id, created_at
+                        delta_qty, snapshot_stock, snapshot_cost, snapshot_sell_price, snapshot_inbound_unit_cost, operator_id, created_at
                 )
-                VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW())
+                    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW())
                 "#,
             )
             .bind(next_stock_log_id)
@@ -4012,6 +4556,8 @@ impl PostgresRepository {
             .bind(-item.qty)
             .bind(new_stock)
             .bind(snapshot_cost)
+            .bind(Some(item.sell_price))
+                .bind(Option::<Decimal>::None)
             .bind(operator_id)
             .execute(&mut *tx)
             .await
@@ -4108,7 +4654,7 @@ impl PostgresRepository {
             .map_err(|err| map_sqlx_error("读取采购单状态失败", err))?;
         let items_rows = sqlx::query(
             r#"
-            SELECT product_id, qty, unit_cost
+            SELECT product_id, qty, unit_cost, product_name_snapshot
             FROM purchase_order_items
             WHERE tenant_id = $1 AND purchase_order_id = $2
             ORDER BY id ASC
@@ -4132,6 +4678,9 @@ impl PostgresRepository {
                 unit_cost: item_row
                     .try_get("unit_cost")
                     .map_err(|err| map_sqlx_error("读取采购明细单价失败", err))?,
+                product_name_snapshot: item_row
+                    .try_get("product_name_snapshot")
+                    .map_err(|err| map_sqlx_error("读取采购明细商品名称快照失败", err))?,
             });
         }
 
@@ -4220,6 +4769,14 @@ fn parse_user_role(raw: &str) -> Result<UserRole, AppError> {
     }
 }
 
+fn parse_barcode_lookup_status(raw: &str) -> Result<BarcodeLookupStatus, AppError> {
+    match raw {
+        "FOUND" => Ok(BarcodeLookupStatus::Found),
+        "NOT_FOUND" => Ok(BarcodeLookupStatus::NotFound),
+        _ => Err(AppError::internal(format!("未知条码缓存状态: {raw}"))),
+    }
+}
+
 fn parse_purchase_order_status(raw: &str) -> Result<PurchaseOrderStatus, AppError> {
     match raw {
         "DRAFT" => Ok(PurchaseOrderStatus::Draft),
@@ -4278,9 +4835,9 @@ fn map_product_row(row: sqlx::postgres::PgRow) -> Result<Product, AppError> {
         retail_price: row
             .try_get("retail_price")
             .map_err(|err| map_sqlx_error("读取零售价失败", err))?,
-        wholesale_price: row
-            .try_get("wholesale_price")
-            .map_err(|err| map_sqlx_error("读取批发价失败", err))?,
+        last_inbound_unit_cost: row
+            .try_get("last_inbound_unit_cost")
+            .map_err(|err| map_sqlx_error("读取最近入库单价失败", err))?,
         min_stock_limit: row
             .try_get("min_stock_limit")
             .map_err(|err| map_sqlx_error("读取最低库存失败", err))?,
@@ -4456,7 +5013,7 @@ mod tests {
                 current_stock INTEGER NOT NULL DEFAULT 0,
                 cost_price NUMERIC(18,4) NOT NULL DEFAULT 0,
                 retail_price NUMERIC(18,4) NOT NULL DEFAULT 0,
-                wholesale_price NUMERIC(18,4) NOT NULL DEFAULT 0,
+                last_inbound_unit_cost NUMERIC(18,4) NULL,
                 min_stock_limit INTEGER NOT NULL DEFAULT 0,
                 version INTEGER NOT NULL DEFAULT 1,
                 is_deleted BOOLEAN NOT NULL DEFAULT FALSE,
@@ -4508,6 +5065,8 @@ mod tests {
                 delta_qty INTEGER NOT NULL,
                 snapshot_stock INTEGER NOT NULL,
                 snapshot_cost NUMERIC(18,4) NOT NULL DEFAULT 0,
+                snapshot_sell_price NUMERIC(18,4) NULL,
+                snapshot_inbound_unit_cost NUMERIC(18,4) NULL,
                 operator_id UUID NOT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()
             )
@@ -4585,6 +5144,7 @@ mod tests {
                 product_id BIGINT NOT NULL,
                 qty INTEGER NOT NULL,
                 unit_cost NUMERIC(18,4) NOT NULL,
+                product_name_snapshot TEXT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 CONSTRAINT purchase_order_items_qty_check CHECK (qty > 0),
                 CONSTRAINT purchase_order_items_unit_cost_check CHECK (unit_cost >= 0),
@@ -4652,6 +5212,7 @@ mod tests {
                 qty INTEGER NOT NULL,
                 sell_price NUMERIC(18,4) NOT NULL,
                 returned_qty INTEGER NOT NULL DEFAULT 0,
+                product_name_snapshot TEXT NULL,
                 created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
                 CONSTRAINT sales_order_items_qty_check CHECK (qty > 0),
                 CONSTRAINT sales_order_items_sell_price_check CHECK (sell_price >= 0),
@@ -4750,7 +5311,7 @@ mod tests {
             current_stock: 50,
             cost_price: Decimal::new(210, 2),
             retail_price: Decimal::new(350, 2),
-            wholesale_price: Decimal::new(320, 2),
+            last_inbound_unit_cost: Some(Decimal::new(320, 2)),
             min_stock_limit: 5,
             version,
             is_deleted: false,
@@ -4775,6 +5336,7 @@ mod tests {
                 product_id,
                 qty: 5,
                 unit_cost: Decimal::new(250, 2),
+                product_name_snapshot: Some("回归测试采购商品".to_string()),
             }],
             remark: Some("仓储回归采购单".to_string()),
             created_by,
@@ -4806,6 +5368,7 @@ mod tests {
                 qty,
                 sell_price: Decimal::new(350, 2),
                 returned_qty: 0,
+                product_name_snapshot: Some("回归测试销售商品".to_string()),
             }],
             remark: Some("仓储回归销售单".to_string()),
             created_by,
@@ -5057,7 +5620,7 @@ mod tests {
                 tenant_id,
                 product_id,
                 5,
-                Decimal::new(300, 2),
+                Some(Decimal::new(300, 2)),
                 Some(original.version),
                 "PO-REG-OL-001",
                 operator_id,
@@ -5071,7 +5634,7 @@ mod tests {
                 tenant_id,
                 product_id,
                 1,
-                Decimal::new(280, 2),
+                Some(Decimal::new(280, 2)),
                 Some(original.version),
                 "PO-REG-OL-002",
                 operator_id,
@@ -5100,7 +5663,7 @@ mod tests {
             json!(first_inbound.current_stock)
         );
 
-        let outbound_items = vec![(product_id, 3, None)];
+        let outbound_items = vec![(product_id, 3, None, None)];
         let first_outbound = repo
             .outbound(
                 Some(&pool),
@@ -5116,7 +5679,7 @@ mod tests {
         assert_eq!(first_outbound.len(), 1);
         let outbound_snapshot = first_outbound[0].clone();
 
-        let stale_outbound_items = vec![(product_id, 1, None)];
+        let stale_outbound_items = vec![(product_id, 1, None, None)];
         let outbound_err = repo
             .outbound(
                 Some(&pool),
@@ -5173,7 +5736,7 @@ mod tests {
             .await
             .expect("insert product for outbound insufficient-stock regression");
 
-        let outbound_items = vec![(product_id, 5, None)];
+        let outbound_items = vec![(product_id, 5, None, None)];
         let err = repo
             .outbound(
                 Some(&pool),
@@ -5463,7 +6026,7 @@ mod tests {
             .expect("product should exist after purchase-order confirm");
         assert_eq!(product_after_confirm.current_stock, 5);
 
-        let outbound_items = vec![(product_id, 4, None)];
+        let outbound_items = vec![(product_id, 4, None, None)];
         let outbound_products = repo
             .outbound(
                 Some(&pool),
@@ -5657,7 +6220,7 @@ mod tests {
             .expect("stock-check start should succeed before book-stock-drift confirm");
         assert_eq!(started.status, StockCheckStatus::Counting);
 
-        let outbound_items = vec![(product_id, 1, None)];
+        let outbound_items = vec![(product_id, 1, None, None)];
         let drifted_products = repo
             .outbound(
                 Some(&pool),

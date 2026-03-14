@@ -6,6 +6,7 @@ class UserSession {
     required this.refreshToken,
     required this.expiresIn,
     required this.tenantId,
+    required this.tenantCode,
     required this.user,
   });
 
@@ -13,6 +14,8 @@ class UserSession {
   final String refreshToken;
   final int expiresIn;
   final String tenantId;
+  /// 人类可读源户码，登录后保存，下次自动填写
+  final String tenantCode;
   final AuthUser user;
 
   factory UserSession.fromJson(Map<String, dynamic> json) {
@@ -21,7 +24,9 @@ class UserSession {
       refreshToken: (json['refresh_token'] ?? '').toString(),
       expiresIn: _toInt(json['expires_in']),
       tenantId: (json['tenant_id'] ?? '').toString(),
-      user: AuthUser.fromJson((json['user_info'] ?? <String, dynamic>{}) as Map<String, dynamic>),
+      tenantCode: (json['tenant_code'] ?? '').toString(),
+      user: AuthUser.fromJson(
+          (json['user_info'] ?? <String, dynamic>{}) as Map<String, dynamic>),
     );
   }
 
@@ -31,7 +36,9 @@ class UserSession {
       refreshToken: (json['refreshToken'] ?? '').toString(),
       expiresIn: _toInt(json['expiresIn']),
       tenantId: (json['tenantId'] ?? '').toString(),
-      user: AuthUser.fromJson((json['user'] ?? <String, dynamic>{}) as Map<String, dynamic>),
+      tenantCode: (json['tenantCode'] ?? '').toString(),
+      user: AuthUser.fromJson(
+          (json['user'] ?? <String, dynamic>{}) as Map<String, dynamic>),
     );
   }
 
@@ -41,6 +48,7 @@ class UserSession {
       'refreshToken': refreshToken,
       'expiresIn': expiresIn,
       'tenantId': tenantId,
+      'tenantCode': tenantCode,
       'user': user.toJson(),
     };
   }

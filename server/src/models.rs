@@ -1,4 +1,4 @@
-use chrono::Utc;
+use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -34,6 +34,13 @@ pub struct User {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Tenant {
+    pub id: Uuid,
+    pub code: String,
+    pub name: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Product {
     pub id: i64,
     pub tenant_id: Uuid,
@@ -44,10 +51,37 @@ pub struct Product {
     pub current_stock: i32,
     pub cost_price: Decimal,
     pub retail_price: Decimal,
-    pub wholesale_price: Decimal,
+    pub last_inbound_unit_cost: Option<Decimal>,
     pub min_stock_limit: i32,
     pub version: i32,
     pub is_deleted: bool,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+pub enum BarcodeLookupStatus {
+    Found,
+    NotFound,
+}
+
+impl BarcodeLookupStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Found => "FOUND",
+            Self::NotFound => "NOT_FOUND",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BarcodeLookupCache {
+    pub tenant_id: Uuid,
+    pub barcode: String,
+    pub lookup_status: BarcodeLookupStatus,
+    pub product_name: Option<String>,
+    pub raw_payload: Value,
+    pub expires_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -113,6 +147,7 @@ pub struct PurchaseOrderItem {
     pub product_id: i64,
     pub qty: i32,
     pub unit_cost: Decimal,
+    pub product_name_snapshot: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -138,6 +173,7 @@ pub struct SalesOrderItem {
     pub qty: i32,
     pub sell_price: Decimal,
     pub returned_qty: i32,
+    pub product_name_snapshot: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -206,6 +242,8 @@ pub struct StockLog {
     pub delta_qty: i32,
     pub snapshot_stock: i32,
     pub snapshot_cost: Decimal,
+    pub snapshot_sell_price: Option<Decimal>,
+    pub snapshot_inbound_unit_cost: Option<Decimal>,
     pub operator_id: Uuid,
     pub created_at: String,
 }
@@ -221,6 +259,8 @@ impl StockLog {
         delta_qty: i32,
         snapshot_stock: i32,
         snapshot_cost: Decimal,
+        snapshot_sell_price: Option<Decimal>,
+        snapshot_inbound_unit_cost: Option<Decimal>,
         operator_id: Uuid,
     ) -> Self {
         Self {
@@ -232,6 +272,8 @@ impl StockLog {
             delta_qty,
             snapshot_stock,
             snapshot_cost,
+            snapshot_sell_price,
+            snapshot_inbound_unit_cost,
             operator_id,
             created_at: Utc::now().to_rfc3339(),
         }

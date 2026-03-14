@@ -173,7 +173,10 @@ class _JxcAppState extends State<JxcApp> {
 
           if (!_sessionController.isAuthenticated) {
             _disposeInventoryControllers();
-            return AuthPage(sessionController: _sessionController);
+            return AuthPage(
+              sessionController: _sessionController,
+              sessionStorage: _services.sessionStorage,
+            );
           }
 
           _ensureInventoryControllers();

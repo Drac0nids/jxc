@@ -39,7 +39,10 @@ class SessionController extends ChangeNotifier {
     }
   }
 
-  Future<bool> login({required String username, required String password}) async {
+  Future<bool> login(
+      {required String username,
+      required String password,
+      String? tenantCode}) async {
     if (_submitting) {
       return false;
     }
@@ -47,9 +50,14 @@ class SessionController extends ChangeNotifier {
     _setSubmitting(true);
     try {
       final UserSession nextSession = await _authRepository.login(
-        LoginRequest(username: username, password: password),
+        LoginRequest(
+            username: username, password: password, tenantCode: tenantCode),
       );
       await _sessionStorage.write(nextSession);
+      // 登录成功后，持久化租户码：优先用服务端返回的，其次用输入的
+      final codeToSave =
+          nextSession.tenantCode.isNotEmpty ? nextSession.tenantCode : (tenantCode ?? '');
+      await _sessionStorage.writeTenantCode(codeToSave);
       _session = nextSession;
       _errorMessage = null;
       notifyListeners();
@@ -111,6 +119,11 @@ class SessionController extends ChangeNotifier {
     } catch (_) {
       // 忽略登出接口失败，始终执行本地会话清理。
     } finally {
+      final current = _session;
+      if (current != null) {
+        final scope = '${current.tenantId}:${current.user.id}';
+        await _sessionStorage.clearScanModesForScope(scope);
+      }
       await _sessionStorage.clear();
       _session = null;
       _errorMessage = null;
@@ -136,7 +149,9 @@ class SessionController extends ChangeNotifier {
   String _humanizeError(Object error) {
     if (error is ApiException) {
       final String requestIdPart =
-          (error.requestId == null || error.requestId!.isEmpty) ? '' : '，request_id=${error.requestId}';
+          (error.requestId == null || error.requestId!.isEmpty)
+              ? ''
+              : '，request_id=${error.requestId}';
       return '${error.message}（code=${error.code}$requestIdPart）';
     }
     if (error is FormatException) {

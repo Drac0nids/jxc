@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{State},
+    extract::State,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
@@ -8,14 +8,15 @@ use serde::Deserialize;
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::routes::common::postgres_pool_or_none;
 use crate::{
     error::AppError,
-    middleware::{generate_token},
-    models::{User, UserRole, hash_password},
+    extractors::AppJson,
+    middleware::generate_token,
+    models::{Tenant, User, UserRole, hash_password},
     response::{ApiResponse, build_response_headers, resolve_request_id},
     state::AppState,
 };
-use crate::routes::common::{postgres_pool_or_none};
 
 #[derive(Debug, Deserialize)]
 pub struct RegisterRequest {
@@ -29,6 +30,8 @@ pub struct RegisterRequest {
 pub struct LoginRequest {
     pub username: String,
     pub password: String,
+    /// 租户码，登录时传入以实现租户隔离（首次登录后客户端记住，下次自动填写）
+    pub tenant_code: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,7 +42,7 @@ pub struct RefreshTokenRequest {
 pub async fn register(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<RegisterRequest>,
+    AppJson(req): AppJson<RegisterRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
 
@@ -66,7 +69,20 @@ pub async fn register(
         password_hash: hash_password(password),
     };
 
+    // 生成6位大写字母+数字租户码，确保不重复时写入（极低概率冲突，生产可加重试）
+    let tenant_code = generate_tenant_code();
+    let tenant = Tenant {
+        id: user.tenant_id,
+        code: tenant_code.clone(),
+        name: tenant_name.clone().unwrap_or_default(),
+    };
+
     if state.repository.is_postgres() {
+        state
+            .repository
+            .create_tenant(postgres_pool_or_none(&state), &tenant)
+            .await
+            .map_err(|err| err.with_request_id(request_id.clone()))?;
         state
             .repository
             .create_user(postgres_pool_or_none(&state), &user)
@@ -109,6 +125,7 @@ pub async fn register(
     let body = ApiResponse::success(
         json!({
             "registered": true,
+            "tenant_code": tenant_code,
             "tenant_name": tenant_name,
             "access_token": access_token,
             "refresh_token": refresh_token,
@@ -134,7 +151,7 @@ pub async fn register(
 pub async fn login(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<LoginRequest>,
+    AppJson(req): AppJson<LoginRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
 
@@ -144,13 +161,43 @@ pub async fn login(
 
     let username = req.username.trim();
     let user = if state.repository.is_postgres() {
-        state
-            .repository
-            .find_user_by_username(postgres_pool_or_none(&state), username)
-            .await?
-            .ok_or_else(|| {
-                AppError::unauthorized("用户名或密码错误").with_request_id(request_id.clone())
-            })?
+        // 优先用 tenant_code + username 精确定位租户，防止跨租户同名
+        if let Some(ref code) = req.tenant_code {
+            let code = code.trim();
+            if !code.is_empty() {
+                state
+                    .repository
+                    .find_user_by_tenant_code_and_username(
+                        postgres_pool_or_none(&state),
+                        code,
+                        username,
+                    )
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::unauthorized("租户码或用户名/密码错误")
+                            .with_request_id(request_id.clone())
+                    })?
+            } else {
+                // 向后兼容：没有 tenant_code 时按用户名全局查
+                state
+                    .repository
+                    .find_user_by_username(postgres_pool_or_none(&state), username)
+                    .await?
+                    .ok_or_else(|| {
+                        AppError::unauthorized("用户名或密码错误")
+                            .with_request_id(request_id.clone())
+                    })?
+            }
+        } else {
+            state
+                .repository
+                .find_user_by_username(postgres_pool_or_none(&state), username)
+                .await?
+                .ok_or_else(|| {
+                    AppError::unauthorized("用户名或密码错误")
+                        .with_request_id(request_id.clone())
+                })?
+        }
     } else {
         let users = state.users.lock().map_err(|_| {
             AppError::internal("用户状态锁异常").with_request_id(request_id.clone())
@@ -191,6 +238,8 @@ pub async fn login(
             "refresh_token": refresh_token,
             "expires_in": state.config.access_token_exp_secs,
             "tenant_id": user.tenant_id,
+            // 内存模式无 tenants 表，返回空；PostgreSQL 模式通过 tenant_code 查到后原样返回
+            "tenant_code": req.tenant_code.as_deref().map(str::trim).filter(|s| !s.is_empty()),
             "user_info": {
                 "id": user.id,
                 "name": user.name,
@@ -211,7 +260,7 @@ pub async fn login(
 pub async fn refresh_token(
     State(state): State<AppState>,
     headers: HeaderMap,
-    Json(req): Json<RefreshTokenRequest>,
+    AppJson(req): AppJson<RefreshTokenRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
 
@@ -219,8 +268,9 @@ pub async fn refresh_token(
         return Err(AppError::bad_request("refresh_token 不能为空").with_request_id(request_id));
     }
 
-    let claims = crate::middleware::verify_token(&state.config.jwt_secret, req.refresh_token.trim())
-        .map_err(|e| e.with_request_id(request_id.clone()))?;
+    let claims =
+        crate::middleware::verify_token(&state.config.jwt_secret, req.refresh_token.trim())
+            .map_err(|e| e.with_request_id(request_id.clone()))?;
 
     if claims.token_type != "refresh" {
         return Err(AppError::unauthorized("token_type 非 refresh").with_request_id(request_id));
@@ -303,4 +353,15 @@ pub async fn logout(
         Json(body),
     )
         .into_response())
+}
+
+/// 生成6位大写字母+数字租户码，使用新 UUID 字节作为随机来源
+/// 示例：ABC123、X7K9MQ
+fn generate_tenant_code() -> String {
+    const CHARSET: &[u8] = b"ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    let bytes = Uuid::new_v4().into_bytes();
+    bytes[..6]
+        .iter()
+        .map(|&b| CHARSET[(b as usize) % CHARSET.len()] as char)
+        .collect()
 }
