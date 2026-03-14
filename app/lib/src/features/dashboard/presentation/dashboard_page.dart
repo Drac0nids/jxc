@@ -9,7 +9,7 @@ import '../../inventory/application/inbound_logs_controller.dart';
 import '../../inventory/application/outbound_controller.dart';
 import '../../inventory/application/stock_check_controller.dart';
 import '../../inventory/application/stock_check_logs_controller.dart';
-import '../../inventory/presentation/inbound_logs_page.dart';
+
 import '../../inventory/presentation/inbound_page.dart';
 import '../../inventory/presentation/outbound_page.dart';
 import '../../inventory/presentation/stock_check_page.dart';
@@ -32,7 +32,6 @@ import 'sales_trend_page.dart';
 enum _QuickActionType {
   outbound,
   inbound,
-  inboundLogs,
   stockCheck,
   products,
 }
@@ -215,10 +214,10 @@ class _DashboardPageState extends State<DashboardPage> {
     final scope = session == null
         ? ''
         : '${session.tenantId}:${session.user.id}';
-    final today = _fmtDate(DateUtils.dateOnly(DateTime.now()));
 
     switch (type) {
       case _QuickActionType.inbound:
+
         Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => InboundPage(
             controller: widget.inboundController,
@@ -234,15 +233,6 @@ class _DashboardPageState extends State<DashboardPage> {
             controller: widget.outboundController,
             sessionStorage: widget.sessionStorage,
             scanPreferenceScope: scope,
-          ),
-        ));
-      case _QuickActionType.inboundLogs:
-        Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => InboundLogsPage(
-            controller: widget.inboundLogsController,
-            initialStartDate: today,
-            initialEndDate: today,
-            initialPageSize: _defaultPageSize,
           ),
         ));
       case _QuickActionType.stockCheck:
@@ -282,8 +272,6 @@ class _DashboardPageState extends State<DashboardPage> {
             role == UserRole.owner || role == UserRole.sales;
         final canStockCheck =
             role == UserRole.owner || role == UserRole.purchaser;
-        final canInboundLogs =
-            role == UserRole.owner || role == UserRole.purchaser;
         final canProducts = role == UserRole.owner ||
             role == UserRole.purchaser ||
             role == UserRole.sales;
@@ -306,15 +294,6 @@ class _DashboardPageState extends State<DashboardPage> {
               subtitle: '到货扫码入库',
               icon: Icons.move_to_inbox_rounded,
               color: Color(0xFF10B981),
-              enabled: true,
-            ),
-          if (canInboundLogs)
-            const _QuickActionItem(
-              type: _QuickActionType.inboundLogs,
-              title: '入库记录',
-              subtitle: '只读查询与分页',
-              icon: Icons.receipt_long_rounded,
-              color: Color(0xFF3B82F6),
               enabled: true,
             ),
           if (canStockCheck)
