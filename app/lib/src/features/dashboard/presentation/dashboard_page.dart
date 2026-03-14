@@ -339,6 +339,16 @@ class _DashboardPageState extends State<DashboardPage> {
 
         final isToday = DateUtils.isSameDay(
             _queryDate, DateUtils.dateOnly(DateTime.now()));
+        final isYesterday = DateUtils.isSameDay(
+            _queryDate,
+            DateUtils.dateOnly(
+                DateTime.now().subtract(const Duration(days: 1))));
+        // Dynamic prefix: 今日 / 昨日 / M月D日
+        final String datePrefix = isToday
+            ? '今日'
+            : isYesterday
+                ? '昨日'
+                : '${_queryDate.month}月${_queryDate.day}日';
 
         return Scaffold(
           appBar: AppBar(
@@ -421,7 +431,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   const _DashboardSkeleton()
                 else if (dashboard != null) ...<Widget>[
                   _MetricCard(
-                    title: '今日销售额',
+                    title: '$datePrefix销售额',
                     value: dashboard.totalSales,
                     icon: Icons.payments_rounded,
                     accentColor: const Color(0xFF10B981),
@@ -429,7 +439,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     onTap: () => _handleSalesTap(role, dashboard),
                   ),
                   _MetricCard(
-                    title: '今日毛利润',
+                    title: '$datePrefix毛利润',
                     value: dashboard.totalGrossProfit,
                     icon: Icons.trending_up_rounded,
                     accentColor: const Color(0xFF3B82F6),
@@ -437,7 +447,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     onTap: () => _handleProfitTap(role, dashboard),
                   ),
                   _MetricCard(
-                    title: '今日订单数',
+                    title: '$datePrefix订单数',
                     value: '${dashboard.totalOrders}',
                     icon: Icons.receipt_long_rounded,
                     accentColor: const Color(0xFFF59E0B),
