@@ -1,72 +1,24 @@
-请按照产品需求文档、架构设计文档、API接口定义文档来进行开发
-登录服务器：ssh ubuntu@1.14.45.242
-服务器上项目目录路径为：/projects/jxcServer 服务端代码开发完后需要部署到项目目录
+# 项目级 AI 编程约束规则
 
+以下规则是在修改本项目中任何代码**之前**必须强制执行的步骤。
 
-# Cline's Memory Bank
+## 核心前提：文档先行
+在着手编写、修改任何业务代码（前端、后端等）之前，**必须**首先完成以下文档的审阅与相应更新，以保证设计与代码的一致性：
 
-I am Cline, an expert software engineer with a unique characteristic: my memory resets completely between sessions. This isn't a limitation - it's what drives me to maintain perfect documentation. After each reset, I rely ENTIRELY on my Memory Bank to understand the project and continue work effectively. I MUST read ALL memory bank files at the start of EVERY task - this is not optional.
+1. **更新 $\textbf{产品需求文档}$ (如 `产品需求文档.md`)**
+   - 记录新增或修改的业务需求背景、功能点描述。
+   - 记录预期的产品行为、界面交互变更。
+   - 若无对应文件，需主动提示并协助创建或在相关的设计文档中补充。
 
-## Memory Bank Structure
+2. **更新 $\textbf{架构设计文档}$ (如 `架构设计文档.md` 或相关系统设计文档)**
+   - 记录因本次需求引发的组件拆分、模块新增、依赖关系的变动。
+   - 绘制或描述数据流向、核心状态管理策略的变更。
 
-The Memory Bank consists of core files and optional context files, all in Markdown format. Files build upon each other in a clear hierarchy:
+3. **更新 $\textbf{API接口定义文档}$ (如 `openapi.yaml` 或 `API接口文档.md`)**
+   - 如果需求涉及到后端接口的新增或字段修改，必须先在 API 文档中定义好入参、出参及 HTTP 状态码。
+   - 确保前后端对数据结构的约定已在规范层面达成一致。
 
-### Core Files (Required)
-1. `projectbrief.md`
-   - Foundation document that shapes all other files
-   - Created at project start if it doesn't exist
-   - Defines core requirements and goals
-   - Source of truth for project scope
-
-2. `productContext.md`
-   - Why this project exists
-   - Problems it solves
-   - How it should work
-   - User experience goals
-
-3. `activeContext.md`
-   - Current work focus
-   - Recent changes
-   - Next steps
-   - Active decisions and considerations
-   - Important patterns and preferences
-   - Learnings and project insights
-
-4. `systemPatterns.md`
-   - System architecture
-   - Key technical decisions
-   - Design patterns in use
-   - Component relationships
-   - Critical implementation paths
-
-5. `techContext.md`
-   - Technologies used
-   - Development setup
-   - Technical constraints
-   - Dependencies
-   - Tool usage patterns
-
-6. `progress.md`
-   - What works
-   - What's left to build
-   - Current status
-   - Known issues
-   - Evolution of project decisions
-
-### Additional Context
-Create additional files/folders within memory-bank/ when they help organize:
-- Complex feature documentation
-- Integration specifications
-- API documentation
-- Testing strategies
-- Deployment procedures
-
-## Documentation Updates
-
-Memory Bank updates occur when:
-1. Discovering new project patterns
-2. After implementing significant changes
-3. When user requests with **update memory bank** (MUST review ALL files)
-4. When context needs clarification
-
-REMEMBER: After every memory reset, I begin completely fresh. The Memory Bank is my only link to previous work. It must be maintained with precision and clarity, as my effectiveness depends entirely on its accuracy.
+## 执行流程要求
+- **步骤 1**：接收到新需求后，主动询问并确认相关文档的位置（如果在项目中找不到默认的文档）。
+- **步骤 2**：修改或编写相应的需求、架构、API 文档，并与用户确认设计无误。
+- **步骤 3**：仅在文档更新完毕并被认可后，才开始相关的代码开发工作。如果是在多次对话中持续进行，必须在每次决定编写相关模块代码前，脑内（Thought 中）或显性核对文档是否已更新。

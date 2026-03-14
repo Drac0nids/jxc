@@ -22,6 +22,7 @@ interface PurchaseItemForm {
   product_id: string
   qty: string
   unit_cost: string
+  editable: boolean
 }
 
 const authStore = useAuthStore()
@@ -40,28 +41,20 @@ const orderResult = ref<PurchaseOrderData | null>(null)
 
 let itemSeed = 1
 
-function generateBizNo(): string {
-  const now = new Date()
-  const pad = (value: number): string => value.toString().padStart(2, '0')
-  const timePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  const randomPart = Math.random().toString(36).slice(2, 6).toUpperCase()
-  return `PO-${timePart}-${randomPart}`
-}
-
 function createItemForm(): PurchaseItemForm {
   return {
     local_id: itemSeed++,
     product_id: '',
     qty: '1',
     unit_cost: '',
+    editable: false,
   }
 }
 
 const createForm = reactive({
-  biz_no: generateBizNo(),
   supplier_id: '',
   remark: '',
-  items: [createItemForm()] as PurchaseItemForm[],
+  items: [] as PurchaseItemForm[],
 })
 
 const scanForm = reactive({
@@ -102,11 +95,15 @@ function addCreateItem(): void {
   createForm.items.push(createItemForm())
 }
 
-function removeCreateItem(localId: number): void {
-  if (createForm.items.length <= 1) {
+function toggleCreateItemEditable(localId: number): void {
+  const target = createForm.items.find((item) => item.local_id === localId)
+  if (!target) {
     return
   }
+  target.editable = !target.editable
+}
 
+function removeCreateItem(localId: number): void {
   const index = createForm.items.findIndex((item) => item.local_id === localId)
   if (index >= 0) {
     createForm.items.splice(index, 1)
@@ -114,11 +111,18 @@ function removeCreateItem(localId: number): void {
 }
 
 function resetCreateForm(): void {
-  createForm.biz_no = generateBizNo()
   createForm.supplier_id = ''
   createForm.remark = ''
-  createForm.items = [createItemForm()]
+  createForm.items = []
   resetScanForm()
+}
+
+function isBlankCreateItem(item: PurchaseItemForm): boolean {
+  return !item.product_id.trim() && !item.qty.trim() && !item.unit_cost.trim()
+}
+
+function getEffectiveCreateItems(items: PurchaseItemForm[]): PurchaseItemForm[] {
+  return items.filter((item) => !isBlankCreateItem(item))
 }
 
 function parseExpectedVersion(): number | undefined {
@@ -146,10 +150,6 @@ function validateCreateForm(): string | null {
     return '当前角色无采购单操作权限，仅 OWNER/PURCHASER 可操作'
   }
 
-  if (!createForm.biz_no.trim()) {
-    return '请输入采购单业务单号'
-  }
-
   if (createForm.supplier_id.trim()) {
     const supplierId = Number(createForm.supplier_id.trim())
     if (!Number.isInteger(supplierId) || supplierId <= 0) {
@@ -157,13 +157,14 @@ function validateCreateForm(): string | null {
     }
   }
 
-  if (createForm.items.length === 0) {
+  const effectiveItems = getEffectiveCreateItems(createForm.items)
+  if (effectiveItems.length === 0) {
     return '请至少填写一条采购明细'
   }
 
-  for (let index = 0; index < createForm.items.length; index += 1) {
+  for (let index = 0; index < effectiveItems.length; index += 1) {
     const row = index + 1
-    const item = createForm.items[index]
+    const item = effectiveItems[index]
     if (!item) {
       return `第 ${row} 行明细不存在，请重试`
     }
@@ -212,14 +213,13 @@ function validateActionForm(): string | null {
 }
 
 function buildCreatePayload(): PurchaseOrderCreateRequest {
-  const items: PurchaseOrderCreateItemRequest[] = createForm.items.map((item) => ({
+  const items: PurchaseOrderCreateItemRequest[] = getEffectiveCreateItems(createForm.items).map((item) => ({
     product_id: Number(item.product_id.trim()),
     qty: Number(item.qty.trim()),
     unit_cost: item.unit_cost.trim(),
   }))
 
   const payload: PurchaseOrderCreateRequest = {
-    biz_no: createForm.biz_no.trim(),
     items,
   }
 
@@ -306,6 +306,11 @@ async function scanAndAccumulateCreateItem(): Promise<void> {
     const response = await scanProductApi(barcode)
     const productId = String(response.data.id)
     const unitCost = customUnitCost || response.data.cost_price || ''
+
+    const effectiveItems = getEffectiveCreateItems(createForm.items)
+    if (effectiveItems.length !== createForm.items.length) {
+      createForm.items = effectiveItems
+    }
 
     const existed = createForm.items.find((item) => item.product_id.trim() === productId)
     if (existed) {
@@ -480,7 +485,7 @@ async function voidOrder(): Promise<void> {
         </label>
 
         <button class="btn" type="submit" :disabled="busy || scanLoading || !canOperate">
-          {{ scanLoading ? '识别中...' : '扫码并累加' }}
+          {{ scanLoading ? '识别中...' : '按条码加入明细' }}
         </button>
         <button class="btn btn-secondary" type="button" :disabled="busy || scanLoading" @click="resetScanForm">
           清空
@@ -496,11 +501,6 @@ async function voidOrder(): Promise<void> {
       <h3>1）创建采购单</h3>
 
       <div class="form-inline form-inline-compact">
-        <label class="form-label inline">
-          <span>业务单号 *</span>
-          <input v-model="createForm.biz_no" :disabled="busy" placeholder="例如：PO-20260306-0001" />
-        </label>
-
         <label class="form-label inline">
           <span>供应商ID</span>
           <input v-model="createForm.supplier_id" :disabled="busy" placeholder="可选，正整数" />
@@ -535,24 +535,48 @@ async function voidOrder(): Promise<void> {
               <tr v-for="(item, index) in createForm.items" :key="item.local_id">
                 <td>{{ index + 1 }}</td>
                 <td>
-                  <input v-model="item.product_id" class="table-input" :disabled="busy" placeholder="1001" />
+                  <input
+                    v-model="item.product_id"
+                    class="table-input"
+                    :readonly="!item.editable || busy"
+                    :disabled="busy"
+                    placeholder="1001"
+                  />
                 </td>
                 <td>
-                  <input v-model="item.qty" class="table-input" :disabled="busy" placeholder="1" />
+                  <input
+                    v-model="item.qty"
+                    class="table-input"
+                    :readonly="!item.editable || busy"
+                    :disabled="busy"
+                    placeholder="1"
+                  />
                 </td>
                 <td>
-                  <input v-model="item.unit_cost" class="table-input" :disabled="busy" placeholder="2.20" />
+                  <input
+                    v-model="item.unit_cost"
+                    class="table-input"
+                    :readonly="!item.editable || busy"
+                    :disabled="busy"
+                    placeholder="2.20"
+                  />
                 </td>
                 <td>
+                  <button class="btn btn-secondary" type="button" :disabled="busy" @click="toggleCreateItemEditable(item.local_id)">
+                    {{ item.editable ? '完成' : '编辑' }}
+                  </button>
                   <button
                     class="btn btn-danger"
                     type="button"
-                    :disabled="busy || createForm.items.length <= 1"
+                    :disabled="busy"
                     @click="removeCreateItem(item.local_id)"
                   >
                     删除
                   </button>
                 </td>
+              </tr>
+              <tr v-if="createForm.items.length === 0">
+                <td colspan="5" class="empty-cell">暂无明细，请先扫码或点击“新增明细”。</td>
               </tr>
             </tbody>
           </table>
@@ -607,6 +631,7 @@ async function voidOrder(): Promise<void> {
       <p>业务单号：{{ orderResult.biz_no }}</p>
       <p>供应商ID：{{ orderResult.supplier_id ?? '-' }}</p>
       <p>状态：{{ orderResult.status }}</p>
+      <p>订单总金额：{{ orderResult.total_amount }}</p>
       <p>版本：{{ orderResult.version }}</p>
       <p>确认时间：{{ orderResult.confirmed_at ?? '-' }}</p>
       <p>作废时间：{{ orderResult.voided_at ?? '-' }}</p>
@@ -619,15 +644,19 @@ async function voidOrder(): Promise<void> {
           <thead>
             <tr>
               <th>商品ID</th>
+              <th>商品名称</th>
               <th>数量</th>
               <th>单次进价</th>
+              <th>行小计</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="item in orderResult.items" :key="`${item.product_id}-${item.qty}-${item.unit_cost}`">
               <td>{{ item.product_id }}</td>
+              <td>{{ item.product_name }}</td>
               <td>{{ item.qty }}</td>
               <td>{{ item.unit_cost }}</td>
+              <td>{{ item.line_amount }}</td>
             </tr>
           </tbody>
         </table>

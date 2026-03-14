@@ -9,8 +9,8 @@ use uuid::Uuid;
 use crate::{
     config::AppConfig,
     models::{
-        AuditLog, Product, PurchaseOrder, SalesOrder, StockCheck, StockLog, User, UserRole,
-        hash_password,
+        AuditLog, BarcodeLookupCache, Product, PurchaseOrder, SalesOrder, StockCheck, StockLog,
+        User, UserRole, hash_password,
     },
     persistence::PersistenceHandles,
     repository::{RepositoryProvider, build_repository_provider},
@@ -25,6 +25,7 @@ pub struct AppState {
     pub products: Arc<Mutex<HashMap<i64, Product>>>,
     pub next_product_id: Arc<Mutex<i64>>,
     pub barcode_index: Arc<Mutex<HashMap<String, i64>>>,
+    pub barcode_lookup_cache: Arc<Mutex<HashMap<String, BarcodeLookupCache>>>,
     pub purchase_orders: Arc<Mutex<HashMap<i64, PurchaseOrder>>>,
     pub next_purchase_order_id: Arc<Mutex<i64>>,
     pub sales_orders: Arc<Mutex<HashMap<i64, SalesOrder>>>,
@@ -60,10 +61,12 @@ impl AppState {
             current_stock: 100,
             cost_price: Decimal::new(210, 2),
             retail_price: Decimal::new(350, 2),
-            wholesale_price: Decimal::new(320, 2),
+            last_inbound_unit_cost: Some(Decimal::new(320, 2)),
             min_stock_limit: 10,
             version: 1,
             is_deleted: false,
+            category_id: None,
+            track_batches: false,
         };
 
         let mut users = HashMap::new();
@@ -86,6 +89,7 @@ impl AppState {
             products: Arc::new(Mutex::new(products)),
             next_product_id: Arc::new(Mutex::new(2000)),
             barcode_index: Arc::new(Mutex::new(barcode_index)),
+            barcode_lookup_cache: Arc::new(Mutex::new(HashMap::new())),
             purchase_orders: Arc::new(Mutex::new(HashMap::new())),
             next_purchase_order_id: Arc::new(Mutex::new(3000)),
             sales_orders: Arc::new(Mutex::new(HashMap::new())),

@@ -11,9 +11,9 @@ use crate::{
     config::StorageBackend,
     error::AppError,
     models::{
-        AuditLog, BarcodeLookupCache, BarcodeLookupStatus, Product, PurchaseOrder,
-        PurchaseOrderItem, PurchaseOrderStatus, SalesOrder, SalesOrderItem, SalesOrderStatus,
-        StockCheck, StockCheckItem, StockCheckStatus, StockLog, User, UserRole,
+        AuditLog, BarcodeLookupCache, BarcodeLookupStatus, Category, Product, ProductBatch,
+        PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus, SalesOrder, SalesOrderItem,
+        SalesOrderStatus, StockCheck, StockCheckItem, StockCheckStatus, StockLog, User, UserRole,
     },
 };
 
@@ -772,6 +772,168 @@ impl RepositoryProvider {
             Self::Memory(_) => Err(unsupported_operation("confirm_stock_check")),
         }
     }
+
+    // ── 分类 ──────────────────────────────────────────────────────────────────
+
+    pub async fn list_categories_by_tenant(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+    ) -> Result<Vec<Category>, AppError> {
+        match self {
+            Self::Postgres(repo) => repo.list_categories_by_tenant(pool, tenant_id).await,
+            Self::Memory(_) => Ok(Vec::new()),
+        }
+    }
+
+    pub async fn find_category_by_id(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        category_id: i64,
+    ) -> Result<Option<Category>, AppError> {
+        match self {
+            Self::Postgres(repo) => repo.find_category_by_id(pool, tenant_id, category_id).await,
+            Self::Memory(_) => Ok(None),
+        }
+    }
+
+    pub async fn create_category(
+        &self,
+        pool: Option<&PgPool>,
+        category: &Category,
+    ) -> Result<Category, AppError> {
+        match self {
+            Self::Postgres(repo) => repo.create_category(pool, category).await,
+            Self::Memory(_) => Err(unsupported_operation("create_category")),
+        }
+    }
+
+    pub async fn update_category(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        category_id: i64,
+        name: &str,
+        sort_order: i32,
+    ) -> Result<Category, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.update_category(pool, tenant_id, category_id, name, sort_order)
+                    .await
+            }
+            Self::Memory(_) => Err(unsupported_operation("update_category")),
+        }
+    }
+
+    pub async fn delete_category(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        category_id: i64,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::Postgres(repo) => repo.delete_category(pool, tenant_id, category_id).await,
+            Self::Memory(_) => Err(unsupported_operation("delete_category")),
+        }
+    }
+
+    // ── 批次 ──────────────────────────────────────────────────────────────────
+
+    pub async fn create_product_batch(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        product_id: i64,
+        lot_number: String,
+        inbound_at: chrono::NaiveDate,
+        produced_at: Option<chrono::NaiveDate>,
+        expires_at: Option<chrono::NaiveDate>,
+        notes: Option<String>,
+    ) -> Result<ProductBatch, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.create_product_batch(
+                    pool, tenant_id, product_id, lot_number, inbound_at,
+                    produced_at, expires_at, notes,
+                ).await
+            }
+            Self::Memory(_) => Err(unsupported_operation("create_product_batch")),
+        }
+    }
+
+    pub async fn list_product_batches(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        product_id: Option<i64>,
+        only_active: bool,
+    ) -> Result<Vec<ProductBatch>, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.list_product_batches(pool, tenant_id, product_id, only_active).await
+            }
+            Self::Memory(_) => Err(unsupported_operation("list_product_batches")),
+        }
+    }
+
+    pub async fn list_expiring_batches(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        within_days: i32,
+    ) -> Result<Vec<ProductBatchWithProduct>, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.list_expiring_batches(pool, tenant_id, within_days).await
+            }
+            Self::Memory(_) => Err(unsupported_operation("list_expiring_batches")),
+        }
+    }
+
+    pub async fn mark_batch_sold_out(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        batch_id: i64,
+    ) -> Result<ProductBatch, AppError> {
+        match self {
+            Self::Postgres(repo) => repo.mark_batch_sold_out(pool, tenant_id, batch_id).await,
+            Self::Memory(_) => Err(unsupported_operation("mark_batch_sold_out")),
+        }
+    }
+
+    pub async fn update_product_batch(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        batch_id: i64,
+        lot_number: Option<String>,
+        produced_at: Option<chrono::NaiveDate>,
+        expires_at: Option<chrono::NaiveDate>,
+        notes: Option<String>,
+    ) -> Result<ProductBatch, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.update_product_batch(
+                    pool, tenant_id, batch_id, lot_number, produced_at, expires_at, notes,
+                ).await
+            }
+            Self::Memory(_) => Err(unsupported_operation("update_product_batch")),
+        }
+    }
+
+    pub async fn delete_product_batch(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        batch_id: i64,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::Postgres(repo) => repo.delete_product_batch(pool, tenant_id, batch_id).await,
+            Self::Memory(_) => Err(unsupported_operation("delete_product_batch")),
+        }
+    }
 }
 
 impl PostgresRepository {
@@ -1089,7 +1251,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted
+                       min_stock_limit, version, is_deleted, category_id, track_batches
                 FROM products
                 WHERE tenant_id = $1 AND barcode = $2
                 LIMIT 1
@@ -1105,7 +1267,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted
+                       min_stock_limit, version, is_deleted, category_id, track_batches
                 FROM products
                 WHERE tenant_id = $1 AND barcode = $2 AND is_deleted = FALSE
                 LIMIT 1
@@ -1216,7 +1378,7 @@ impl PostgresRepository {
             r#"
             SELECT id, tenant_id, sku, barcode, name, unit,
                    current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                   min_stock_limit, version, is_deleted
+                   min_stock_limit, version, is_deleted, category_id, track_batches
             FROM products
             WHERE tenant_id = $1 AND is_deleted = FALSE
             ORDER BY id ASC
@@ -1240,7 +1402,7 @@ impl PostgresRepository {
             r#"
             SELECT id, tenant_id, sku, barcode, name, unit,
                    current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                   min_stock_limit, version, is_deleted
+                   min_stock_limit, version, is_deleted, category_id, track_batches
             FROM products
             WHERE tenant_id = $1
             ORDER BY id ASC
@@ -1646,7 +1808,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted
+                       min_stock_limit, version, is_deleted, category_id, track_batches
                 FROM products
                 WHERE tenant_id = $1 AND id = $2
                 LIMIT 1
@@ -1662,7 +1824,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted
+                       min_stock_limit, version, is_deleted, category_id, track_batches
                 FROM products
                 WHERE tenant_id = $1 AND id = $2 AND is_deleted = FALSE
                 LIMIT 1
@@ -1798,12 +1960,12 @@ impl PostgresRepository {
             INSERT INTO products (
                 id, tenant_id, sku, barcode, name, unit,
                 current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                min_stock_limit, version, is_deleted, created_at, updated_at
+                min_stock_limit, version, is_deleted, category_id, track_batches, created_at, updated_at
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, $8, $9, $10,
-                $11, $12, $13, NOW(), NOW()
+                $11, $12, $13, $14, $15, NOW(), NOW()
             )
             "#,
         )
@@ -1820,6 +1982,8 @@ impl PostgresRepository {
         .bind(product.min_stock_limit)
         .bind(product.version)
         .bind(product.is_deleted)
+        .bind(product.category_id)
+        .bind(product.track_batches)
         .execute(pool)
         .await
         .map_err(|err| map_sqlx_error("创建商品失败", err))?;
@@ -1849,10 +2013,12 @@ impl PostgresRepository {
                     min_stock_limit = $9,
                     version = $10,
                     is_deleted = $11,
+                    category_id = $12,
+                    track_batches = $13,
                     updated_at = NOW()
-                WHERE id = $12
-                  AND tenant_id = $13
-                  AND version = $14
+                WHERE id = $14
+                  AND tenant_id = $15
+                  AND version = $16
                 "#,
             )
             .bind(&product.sku)
@@ -1866,6 +2032,8 @@ impl PostgresRepository {
             .bind(product.min_stock_limit)
             .bind(product.version)
             .bind(product.is_deleted)
+            .bind(product.category_id)
+            .bind(product.track_batches)
             .bind(product.id)
             .bind(product.tenant_id)
             .bind(ev)
@@ -1887,9 +2055,11 @@ impl PostgresRepository {
                     min_stock_limit = $9,
                     version = $10,
                     is_deleted = $11,
+                    category_id = $12,
+                    track_batches = $13,
                     updated_at = NOW()
-                WHERE id = $12
-                  AND tenant_id = $13
+                WHERE id = $14
+                  AND tenant_id = $15
                 "#,
             )
             .bind(&product.sku)
@@ -1903,6 +2073,8 @@ impl PostgresRepository {
             .bind(product.min_stock_limit)
             .bind(product.version)
             .bind(product.is_deleted)
+            .bind(product.category_id)
+            .bind(product.track_batches)
             .bind(product.id)
             .bind(product.tenant_id)
             .execute(pool)
@@ -1963,7 +2135,7 @@ impl PostgresRepository {
             r#"
             SELECT id, tenant_id, sku, barcode, name, unit,
                    current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                   min_stock_limit, version, is_deleted
+                   min_stock_limit, version, is_deleted, category_id, track_batches
             FROM products
             WHERE tenant_id = $1 AND id = $2
             FOR UPDATE
@@ -2098,7 +2270,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted
+                       min_stock_limit, version, is_deleted, category_id, track_batches
                 FROM products
                 WHERE tenant_id = $1 AND id = $2
                 FOR UPDATE
@@ -2238,7 +2410,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted
+                       min_stock_limit, version, is_deleted, category_id, track_batches
                 FROM products
                 WHERE tenant_id = $1 AND id = $2
                 FOR UPDATE
@@ -4847,6 +5019,468 @@ fn map_product_row(row: sqlx::postgres::PgRow) -> Result<Product, AppError> {
         is_deleted: row
             .try_get("is_deleted")
             .map_err(|err| map_sqlx_error("读取删除标记失败", err))?,
+        category_id: row
+            .try_get("category_id")
+            .map_err(|err| map_sqlx_error("读取分类ID失败", err))?,
+        track_batches: row
+            .try_get("track_batches")
+            .map_err(|err| map_sqlx_error("读取批次追踪标记失败", err))?,
+    })
+}
+
+// ── Category 方法 ─────────────────────────────────────────────────────────────
+impl PostgresRepository {
+    pub async fn list_categories_by_tenant(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+    ) -> Result<Vec<Category>, AppError> {
+        let pool = require_pool(pool)?;
+        let rows = sqlx::query(
+            r#"
+            SELECT id, tenant_id, parent_id, name, level, sort_order, is_deleted
+            FROM categories
+            WHERE tenant_id = $1 AND is_deleted = FALSE
+            ORDER BY level ASC, sort_order ASC, id ASC
+            "#,
+        )
+        .bind(tenant_id)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| map_sqlx_error("查询分类列表失败", err))?;
+
+        let mut result = Vec::with_capacity(rows.len());
+        for row in rows {
+            result.push(Category {
+                id: row.try_get("id").map_err(|e| map_sqlx_error("读取分类ID失败", e))?,
+                tenant_id: row.try_get("tenant_id").map_err(|e| map_sqlx_error("读取租户ID失败", e))?,
+                parent_id: row.try_get("parent_id").map_err(|e| map_sqlx_error("读取父分类ID失败", e))?,
+                name: row.try_get("name").map_err(|e| map_sqlx_error("读取分类名失败", e))?,
+                level: row.try_get("level").map_err(|e| map_sqlx_error("读取分类层级失败", e))?,
+                sort_order: row.try_get("sort_order").map_err(|e| map_sqlx_error("读取排序值失败", e))?,
+                is_deleted: row.try_get("is_deleted").map_err(|e| map_sqlx_error("读取删除标记失败", e))?,
+            });
+        }
+        Ok(result)
+    }
+
+    pub async fn find_category_by_id(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        category_id: i64,
+    ) -> Result<Option<Category>, AppError> {
+        let pool = require_pool(pool)?;
+        let row = sqlx::query(
+            r#"
+            SELECT id, tenant_id, parent_id, name, level, sort_order, is_deleted
+            FROM categories
+            WHERE tenant_id = $1 AND id = $2
+            LIMIT 1
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(category_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| map_sqlx_error("查询分类失败", err))?;
+
+        let Some(row) = row else { return Ok(None); };
+        Ok(Some(Category {
+            id: row.try_get("id").map_err(|e| map_sqlx_error("读取分类ID失败", e))?,
+            tenant_id: row.try_get("tenant_id").map_err(|e| map_sqlx_error("读取租户ID失败", e))?,
+            parent_id: row.try_get("parent_id").map_err(|e| map_sqlx_error("读取父分类ID失败", e))?,
+            name: row.try_get("name").map_err(|e| map_sqlx_error("读取分类名失败", e))?,
+            level: row.try_get("level").map_err(|e| map_sqlx_error("读取分类层级失败", e))?,
+            sort_order: row.try_get("sort_order").map_err(|e| map_sqlx_error("读取排序值失败", e))?,
+            is_deleted: row.try_get("is_deleted").map_err(|e| map_sqlx_error("读取删除标记失败", e))?,
+        }))
+    }
+
+    pub async fn create_category(
+        &self,
+        pool: Option<&PgPool>,
+        category: &Category,
+    ) -> Result<Category, AppError> {
+        let pool = require_pool(pool)?;
+        let row = sqlx::query(
+            r#"
+            INSERT INTO categories (tenant_id, parent_id, name, level, sort_order, is_deleted, created_at, updated_at)
+            VALUES ($1, $2, $3, $4, $5, FALSE, NOW(), NOW())
+            RETURNING id, tenant_id, parent_id, name, level, sort_order, is_deleted
+            "#,
+        )
+        .bind(category.tenant_id)
+        .bind(category.parent_id)
+        .bind(&category.name)
+        .bind(category.level)
+        .bind(category.sort_order)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| {
+            if is_sql_state(&err, "23505") {
+                AppError::conflict(4092, "同级分类下名称已存在")
+            } else {
+                map_sqlx_error("创建分类失败", err)
+            }
+        })?;
+
+        Ok(Category {
+            id: row.try_get("id").map_err(|e| map_sqlx_error("读取分类ID失败", e))?,
+            tenant_id: row.try_get("tenant_id").map_err(|e| map_sqlx_error("读取租户ID失败", e))?,
+            parent_id: row.try_get("parent_id").map_err(|e| map_sqlx_error("读取父分类ID失败", e))?,
+            name: row.try_get("name").map_err(|e| map_sqlx_error("读取分类名失败", e))?,
+            level: row.try_get("level").map_err(|e| map_sqlx_error("读取分类层级失败", e))?,
+            sort_order: row.try_get("sort_order").map_err(|e| map_sqlx_error("读取排序值失败", e))?,
+            is_deleted: row.try_get("is_deleted").map_err(|e| map_sqlx_error("读取删除标记失败", e))?,
+        })
+    }
+
+    pub async fn update_category(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        category_id: i64,
+        name: &str,
+        sort_order: i32,
+    ) -> Result<Category, AppError> {
+        let pool = require_pool(pool)?;
+        let row = sqlx::query(
+            r#"
+            UPDATE categories
+            SET name = $1, sort_order = $2, updated_at = NOW()
+            WHERE id = $3 AND tenant_id = $4 AND is_deleted = FALSE
+            RETURNING id, tenant_id, parent_id, name, level, sort_order, is_deleted
+            "#,
+        )
+        .bind(name)
+        .bind(sort_order)
+        .bind(category_id)
+        .bind(tenant_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| {
+            if is_sql_state(&err, "23505") {
+                AppError::conflict(4092, "同级分类下名称已存在")
+            } else {
+                map_sqlx_error("更新分类失败", err)
+            }
+        })?;
+
+        let Some(row) = row else {
+            return Err(AppError::not_found("分类不存在"));
+        };
+
+        Ok(Category {
+            id: row.try_get("id").map_err(|e| map_sqlx_error("读取分类ID失败", e))?,
+            tenant_id: row.try_get("tenant_id").map_err(|e| map_sqlx_error("读取租户ID失败", e))?,
+            parent_id: row.try_get("parent_id").map_err(|e| map_sqlx_error("读取父分类ID失败", e))?,
+            name: row.try_get("name").map_err(|e| map_sqlx_error("读取分类名失败", e))?,
+            level: row.try_get("level").map_err(|e| map_sqlx_error("读取分类层级失败", e))?,
+            sort_order: row.try_get("sort_order").map_err(|e| map_sqlx_error("读取排序值失败", e))?,
+            is_deleted: row.try_get("is_deleted").map_err(|e| map_sqlx_error("读取删除标记失败", e))?,
+        })
+    }
+
+    pub async fn delete_category(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        category_id: i64,
+    ) -> Result<(), AppError> {
+        let pool = require_pool(pool)?;
+
+        // 检查是否有未删除的子分类
+        let child_count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) FROM categories
+            WHERE tenant_id = $1 AND parent_id = $2 AND is_deleted = FALSE
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(category_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| map_sqlx_error("检查子分类失败", err))?;
+
+        if child_count > 0 {
+            return Err(AppError::business(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                4093,
+                "该分类下还有子分类，请先删除子分类",
+            ));
+        }
+
+        // 检查是否有商品关联此分类
+        let product_count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) FROM products
+            WHERE tenant_id = $1 AND category_id = $2 AND is_deleted = FALSE
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(category_id)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| map_sqlx_error("检查关联商品失败", err))?;
+
+        if product_count > 0 {
+            return Err(AppError::business(
+                StatusCode::UNPROCESSABLE_ENTITY,
+                4094,
+                "该分类下还有在用商品，请先修改商品分类",
+            ));
+        }
+
+        // 软删除
+        let result = sqlx::query(
+            r#"
+            UPDATE categories
+            SET is_deleted = TRUE, updated_at = NOW()
+            WHERE id = $1 AND tenant_id = $2 AND is_deleted = FALSE
+            "#,
+        )
+        .bind(category_id)
+        .bind(tenant_id)
+        .execute(pool)
+        .await
+        .map_err(|err| map_sqlx_error("删除分类失败", err))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found("分类不存在"));
+        }
+        Ok(())
+    }
+
+    // ── 批次 CRUD ────────────────────────────────────────────────────────────
+
+    pub async fn create_product_batch(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        product_id: i64,
+        lot_number: String,
+        inbound_at: chrono::NaiveDate,
+        produced_at: Option<chrono::NaiveDate>,
+        expires_at: Option<chrono::NaiveDate>,
+        notes: Option<String>,
+    ) -> Result<ProductBatch, AppError> {
+        let pool = require_pool(pool)?;
+        let row = sqlx::query(
+            r#"
+            INSERT INTO product_batches
+                (tenant_id, product_id, lot_number, inbound_at, produced_at, expires_at, notes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id, tenant_id, product_id, lot_number, inbound_at, produced_at,
+                      expires_at, notes, is_sold_out, sold_out_at, created_at, updated_at
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(product_id)
+        .bind(&lot_number)
+        .bind(inbound_at)
+        .bind(produced_at)
+        .bind(expires_at)
+        .bind(&notes)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| map_sqlx_error("创建批次失败", err))?;
+        map_product_batch_row(&row)
+    }
+
+    pub async fn list_product_batches(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        product_id: Option<i64>,
+        only_active: bool,
+    ) -> Result<Vec<ProductBatch>, AppError> {
+        let pool = require_pool(pool)?;
+        let mut sql = String::from(
+            r#"SELECT id, tenant_id, product_id, lot_number, inbound_at, produced_at,
+                      expires_at, notes, is_sold_out, sold_out_at, created_at, updated_at
+               FROM product_batches
+               WHERE tenant_id = $1
+            "#,
+        );
+        if product_id.is_some() {
+            sql.push_str(" AND product_id = $2");
+        }
+        if only_active {
+            sql.push_str(" AND is_sold_out = FALSE");
+        }
+        sql.push_str(" ORDER BY inbound_at DESC, id DESC");
+
+        let rows = if let Some(pid) = product_id {
+            sqlx::query(&sql)
+                .bind(tenant_id)
+                .bind(pid)
+                .fetch_all(pool)
+                .await
+        } else {
+            sqlx::query(&sql)
+                .bind(tenant_id)
+                .fetch_all(pool)
+                .await
+        }
+        .map_err(|err| map_sqlx_error("查询批次列表失败", err))?;
+
+        rows.iter().map(map_product_batch_row).collect()
+    }
+
+    pub async fn list_expiring_batches(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        within_days: i32,
+    ) -> Result<Vec<ProductBatchWithProduct>, AppError> {
+        let pool = require_pool(pool)?;
+        // 返回即将过期（含已过期）且未售完的批次，连带商品名称
+        let rows = sqlx::query(
+            r#"
+            SELECT
+                pb.id, pb.tenant_id, pb.product_id, pb.lot_number, pb.inbound_at,
+                pb.produced_at, pb.expires_at, pb.notes, pb.is_sold_out, pb.sold_out_at,
+                pb.created_at, pb.updated_at,
+                p.name AS product_name, p.sku AS product_sku
+            FROM product_batches pb
+            JOIN products p ON p.id = pb.product_id AND p.tenant_id = pb.tenant_id
+            WHERE pb.tenant_id = $1
+              AND pb.is_sold_out = FALSE
+              AND pb.expires_at IS NOT NULL
+              AND pb.expires_at <= CURRENT_DATE + ($2 || ' days')::interval
+            ORDER BY pb.expires_at ASC
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(within_days)
+        .fetch_all(pool)
+        .await
+        .map_err(|err| map_sqlx_error("查询临期批次失败", err))?;
+
+        rows.iter().map(|row| {
+            let batch = map_product_batch_row(row)?;
+            let product_name: String = row.try_get("product_name")
+                .map_err(|e| map_sqlx_error("读取商品名失败", e))?;
+            let product_sku: String = row.try_get("product_sku")
+                .map_err(|e| map_sqlx_error("读取商品SKU失败", e))?;
+            Ok(ProductBatchWithProduct { batch, product_name, product_sku })
+        }).collect()
+    }
+
+    pub async fn mark_batch_sold_out(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        batch_id: i64,
+    ) -> Result<ProductBatch, AppError> {
+        let pool = require_pool(pool)?;
+        let row = sqlx::query(
+            r#"
+            UPDATE product_batches
+            SET is_sold_out = TRUE, sold_out_at = NOW(), updated_at = NOW()
+            WHERE id = $1 AND tenant_id = $2
+            RETURNING id, tenant_id, product_id, lot_number, inbound_at, produced_at,
+                      expires_at, notes, is_sold_out, sold_out_at, created_at, updated_at
+            "#,
+        )
+        .bind(batch_id)
+        .bind(tenant_id)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| map_sqlx_error("标记批次售完失败", err))?;
+
+        let row = row.ok_or_else(|| AppError::not_found("批次不存在"))?;
+        map_product_batch_row(&row)
+    }
+
+    pub async fn update_product_batch(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        batch_id: i64,
+        lot_number: Option<String>,
+        produced_at: Option<chrono::NaiveDate>,
+        expires_at: Option<chrono::NaiveDate>,
+        notes: Option<String>,
+    ) -> Result<ProductBatch, AppError> {
+        let pool = require_pool(pool)?;
+        let row = sqlx::query(
+            r#"
+            UPDATE product_batches
+            SET
+                lot_number  = COALESCE($3, lot_number),
+                produced_at = $4,
+                expires_at  = $5,
+                notes       = $6,
+                updated_at  = NOW()
+            WHERE id = $1 AND tenant_id = $2
+            RETURNING id, tenant_id, product_id, lot_number, inbound_at, produced_at,
+                      expires_at, notes, is_sold_out, sold_out_at, created_at, updated_at
+            "#,
+        )
+        .bind(batch_id)
+        .bind(tenant_id)
+        .bind(&lot_number)
+        .bind(produced_at)
+        .bind(expires_at)
+        .bind(&notes)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| map_sqlx_error("更新批次失败", err))?;
+
+        let row = row.ok_or_else(|| AppError::not_found("批次不存在"))?;
+        map_product_batch_row(&row)
+    }
+
+    pub async fn delete_product_batch(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        batch_id: i64,
+    ) -> Result<(), AppError> {
+        let pool = require_pool(pool)?;
+        let result = sqlx::query(
+            "DELETE FROM product_batches WHERE id = $1 AND tenant_id = $2",
+        )
+        .bind(batch_id)
+        .bind(tenant_id)
+        .execute(pool)
+        .await
+        .map_err(|err| map_sqlx_error("删除批次失败", err))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found("批次不存在"));
+        }
+        Ok(())
+    }
+}
+
+// ── 批次辅助 ─────────────────────────────────────────────────────────────────
+
+/// 临期预警查询返回的扩展视图（批次 + 商品名/SKU）
+#[derive(Debug, Clone)]
+pub struct ProductBatchWithProduct {
+    pub batch: ProductBatch,
+    pub product_name: String,
+    pub product_sku: String,
+}
+
+fn map_product_batch_row(row: &sqlx::postgres::PgRow) -> Result<ProductBatch, AppError> {
+    use sqlx::Row as _;
+    Ok(ProductBatch {
+        id: row.try_get("id").map_err(|e| map_sqlx_error("读取批次id失败", e))?,
+        tenant_id: row.try_get("tenant_id").map_err(|e| map_sqlx_error("读取批次tenant_id失败", e))?,
+        product_id: row.try_get("product_id").map_err(|e| map_sqlx_error("读取批次product_id失败", e))?,
+        lot_number: row.try_get("lot_number").map_err(|e| map_sqlx_error("读取批次号失败", e))?,
+        inbound_at: row.try_get("inbound_at").map_err(|e| map_sqlx_error("读取入库日期失败", e))?,
+        produced_at: row.try_get("produced_at").map_err(|e| map_sqlx_error("读取生产日期失败", e))?,
+        expires_at: row.try_get("expires_at").map_err(|e| map_sqlx_error("读取过期日期失败", e))?,
+        notes: row.try_get("notes").map_err(|e| map_sqlx_error("读取批次备注失败", e))?,
+        is_sold_out: row.try_get("is_sold_out").map_err(|e| map_sqlx_error("读取售完标志失败", e))?,
+        sold_out_at: row.try_get("sold_out_at").map_err(|e| map_sqlx_error("读取售完时间失败", e))?,
+        created_at: row.try_get("created_at").map_err(|e| map_sqlx_error("读取批次创建时间失败", e))?,
+        updated_at: row.try_get("updated_at").map_err(|e| map_sqlx_error("读取批次更新时间失败", e))?,
     })
 }
 
@@ -5315,6 +5949,7 @@ mod tests {
             min_stock_limit: 5,
             version,
             is_deleted: false,
+            category_id: None,
         }
     }
 

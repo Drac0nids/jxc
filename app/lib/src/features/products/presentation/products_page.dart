@@ -4,33 +4,57 @@ import 'package:flutter/material.dart';
 
 import '../../../core/widgets/barcode_scanner_sheet.dart';
 import '../../../core/widgets/brand_ui.dart';
+import '../application/batch_controller.dart';
+import '../application/category_controller.dart';
 import '../application/product_controller.dart';
+import '../models/category_models.dart';
 import '../models/product_models.dart';
+import 'batch_management_page.dart';
+import 'category_management_page.dart';
+import 'create_product_sheet.dart';
 import 'products_edit_page.dart';
+
+// 顶层常量，避免重复创建 RegExp
+const _kMoneyPattern = r'^\d+(\.\d{1,4})?$';
+final RegExp _moneyPattern = RegExp(_kMoneyPattern);
+
+// ════════════════════════════════════════════════════════════════════════════
+// ProductsPage
+// ════════════════════════════════════════════════════════════════════════════
 
 class ProductsPage extends StatefulWidget {
   const ProductsPage({
     super.key,
     required this.controller,
     this.onStockCheck,
+    this.categoryController,
+    this.batchController,
   });
 
   final ProductController controller;
-  /// 可选，传入则商品卡片显示「发起盘点」按鈕
+
+  /// 可选，传入则商品卡片显示「发起盘点」按钮
   final void Function(int productId)? onStockCheck;
+
+  /// 可选，传入则启用分类管理和分类筛选
+  final CategoryController? categoryController;
+
+  /// 可选，传入则商品卡片显示「批次管理」入口
+  final BatchController? batchController;
 
   @override
   State<ProductsPage> createState() => _ProductsPageState();
 }
 
 class _ProductsPageState extends State<ProductsPage> {
-  static final RegExp _moneyPattern = RegExp(r'^\d+(\.\d{1,4})?$');
-
   final TextEditingController _keywordController = TextEditingController();
   final TextEditingController _barcodeController = TextEditingController();
 
   bool _filterExpanded = true;
   Timer? _debounce;
+
+  /// 当前筛选用的分类节点
+  CategoryNode? _filterCategory;
 
   @override
   void initState() {
@@ -39,6 +63,8 @@ class _ProductsPageState extends State<ProductsPage> {
     _barcodeController.text = widget.controller.barcode;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _loadProducts(page: 1);
+      // 预加载分类树，确保卡片中显示分类名称
+      widget.categoryController?.load();
     });
   }
 
@@ -58,6 +84,7 @@ class _ProductsPageState extends State<ProductsPage> {
       pageSize: widget.controller.pageSize,
       keyword: _keywordController.text.trim(),
       barcode: _barcodeController.text.trim(),
+      categoryId: _filterCategory?.id,
     );
   }
 
@@ -71,6 +98,7 @@ class _ProductsPageState extends State<ProductsPage> {
   void _resetFilters() {
     _keywordController.clear();
     _barcodeController.clear();
+    setState(() => _filterCategory = null);
     widget.controller.clearMessages();
     _loadProducts(page: 1);
   }
@@ -98,6 +126,7 @@ class _ProductsPageState extends State<ProductsPage> {
       builder: (BuildContext context) => CreateProductSheet(
         controller: widget.controller,
         moneyPattern: _moneyPattern,
+        categoryController: widget.categoryController,
       ),
     );
     if (created != null) await _loadProducts(page: 1);
@@ -110,6 +139,7 @@ class _ProductsPageState extends State<ProductsPage> {
           controller: widget.controller,
           product: product,
           moneyPattern: _moneyPattern,
+          categoryController: widget.categoryController,
         ),
       ),
     );
@@ -157,6 +187,21 @@ class _ProductsPageState extends State<ProductsPage> {
     }
   }
 
+  // ── Category filter picker ────────────────────────────────────────────────
+
+  Future<void> _pickFilterCategory() async {
+    final cc = widget.categoryController;
+    if (cc == null) return;
+    if (cc.isEmpty) await cc.load();
+    if (!mounted) return;
+
+    // ignore: use_build_context_synchronously
+    final CategoryNode? picked = await _CategoryFilterSheet.show(context, cc);
+    if (!mounted) return;
+    setState(() => _filterCategory = picked);
+    await _loadProducts(page: 1);
+  }
+
   // ── Build ─────────────────────────────────────────────────────────────────
 
   @override
@@ -177,45 +222,57 @@ class _ProductsPageState extends State<ProductsPage> {
           appBar: AppBar(
             title: const Text('商品管理'),
             actions: <Widget>[
-              // Filter toggle
-              IconButton(
-                tooltip: _filterExpanded ? '收起筛选' : '展开筛选',
+              // 新建商品（仅有写权限时显示）
+              if (canWrite)
+                IconButton(
+                  tooltip: '新建商品',
+                  onPressed: busy ? null : _showCreateProductSheet,
+                  icon: const Icon(Icons.add_rounded),
+                ),
+              // 搜索栏 开/关
+              TextButton(
                 onPressed: () =>
                     setState(() => _filterExpanded = !_filterExpanded),
-                icon: Icon(_filterExpanded
-                    ? Icons.filter_list_off
-                    : Icons.filter_list),
+                child: Text(
+                  _filterExpanded ? '收起搜索' : '搜索',
+                  style: TextStyle(
+                    color: _filterExpanded
+                        ? Theme.of(context).colorScheme.primary
+                        : null,
+                  ),
+                ),
               ),
-              IconButton(
-                tooltip: '刷新',
-                onPressed:
-                    busy ? null : () => _loadProducts(page: page),
-                icon: const Icon(Icons.refresh),
-              ),
+              // 分类管理
+              if (widget.categoryController != null)
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => CategoryManagementPage(
+                        controller: widget.categoryController!,
+                      ),
+                    ),
+                  ),
+                  child: const Text('分类'),
+                ),
+              const SizedBox(width: 4),
             ],
           ),
-          floatingActionButton: canWrite
-              ? FloatingActionButton.extended(
-                  onPressed: busy ? null : _showCreateProductSheet,
-                  icon: const Icon(Icons.add),
-                  label: const Text('新建商品'),
-                )
-              : null,
           body: RefreshIndicator(
             onRefresh: () => _loadProducts(page: page),
             child: ListView(
-              padding: const EdgeInsets.all(16),
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
               children: <Widget>[
-                // Hero Banner
-                const BrandHeroBanner(
-                  title: '商品中心',
-                  subtitle: '统一管理商品信息、价格体系与库存状态',
-                  icon: Icons.inventory_2_rounded,
-                  gradientSeedColor: Color(0xFF3B82F6),
+                // ── 页头：紧凑型 ────────────────────────────────────────
+                _PageHeader(
+                  total: total,
+                  page: page,
+                  totalPages: totalPages,
+                  filterCategory: _filterCategory,
+                  categoryController: widget.categoryController,
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
 
-                // Role notice
+                // ── 角色提示 ────────────────────────────────────────────
                 if (!canWrite)
                   const Padding(
                     padding: EdgeInsets.only(bottom: 8),
@@ -225,25 +282,19 @@ class _ProductsPageState extends State<ProductsPage> {
                     ),
                   ),
 
-                // Error / success messages
+                // ── 错误 / 成功提示 ─────────────────────────────────────
                 if (widget.controller.errorMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: StatusNotice(
-                      message: widget.controller.errorMessage!,
-                      tone: NoticeTone.error,
-                    ),
+                  StatusNotice(
+                    message: widget.controller.errorMessage!,
+                    tone: NoticeTone.error,
                   ),
                 if (widget.controller.successMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: StatusNotice(
-                      message: widget.controller.successMessage!,
-                      tone: NoticeTone.success,
-                    ),
+                  StatusNotice(
+                    message: widget.controller.successMessage!,
+                    tone: NoticeTone.success,
                   ),
 
-                // Collapsible filter
+                // ── 筛选区（可折叠）────────────────────────────────────
                 AnimatedCrossFade(
                   duration: const Duration(milliseconds: 220),
                   crossFadeState: _filterExpanded
@@ -253,26 +304,30 @@ class _ProductsPageState extends State<ProductsPage> {
                     keywordController: _keywordController,
                     barcodeController: _barcodeController,
                     busy: busy,
+                    filterCategory: _filterCategory,
+                    categoryController: widget.categoryController,
                     onKeywordChanged: _onKeywordChanged,
                     onSearch: () => _loadProducts(page: 1),
                     onReset: _resetFilters,
                     onScanBarcode: _fillFilterBarcodeByCamera,
+                    onPickCategory: _pickFilterCategory,
+                    onClearCategory: () {
+                      setState(() => _filterCategory = null);
+                      _loadProducts(page: 1);
+                    },
                   ),
                   secondChild: const SizedBox.shrink(),
                 ),
-                const SizedBox(height: 12),
+                const SizedBox(height: 10),
 
-                // List header
-                _ListHeader(total: total, page: page, totalPages: totalPages),
-                const SizedBox(height: 8),
-
-                // List
+                // ── 商品列表 ────────────────────────────────────────────
                 if (busy && widget.controller.list.isEmpty)
                   ..._buildSkeletons(4)
                 else if (widget.controller.list.isEmpty)
                   _EmptyState(
                     hasFilter: _keywordController.text.isNotEmpty ||
-                        _barcodeController.text.isNotEmpty,
+                        _barcodeController.text.isNotEmpty ||
+                        _filterCategory != null,
                     onClearFilter: _resetFilters,
                   )
                 else
@@ -284,10 +339,22 @@ class _ProductsPageState extends State<ProductsPage> {
                         canViewCostPrice: widget.controller.canViewCostPrice,
                         canWrite: canWrite,
                         busy: busy,
+                        categoryController: widget.categoryController,
                         onEdit: () => _openEditPage(p),
                         onDelete: () => _deleteProduct(p),
                         onStockCheck: widget.onStockCheck != null
                             ? () => widget.onStockCheck!(p.id)
+                            : null,
+                        onBatchManage: widget.batchController != null
+                            ? () => Navigator.of(context).push(
+                                  MaterialPageRoute<void>(
+                                    builder: (_) => BatchManagementPage(
+                                      productId: p.id,
+                                      productName: p.name,
+                                      controller: widget.batchController!,
+                                    ),
+                                  ),
+                                )
                             : null,
                       ),
                     ),
@@ -295,15 +362,13 @@ class _ProductsPageState extends State<ProductsPage> {
 
                 const SizedBox(height: 8),
 
-                // Pagination
+                // ── 分页 ────────────────────────────────────────────────
                 if (!busy || widget.controller.list.isNotEmpty)
-                  _PaginationBar(
+                  PaginationBar(
                     page: page,
                     totalPages: totalPages,
                     loading: busy,
-                    onPrev: page > 1
-                        ? () => _loadProducts(page: page - 1)
-                        : null,
+                    onPrev: page > 1 ? () => _loadProducts(page: page - 1) : null,
                     onNext: page < totalPages
                         ? () => _loadProducts(page: page + 1)
                         : null,
@@ -327,7 +392,84 @@ class _ProductsPageState extends State<ProductsPage> {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Filter Card
+// _PageHeader — 紧凑标题行（替换过重的 BrandHeroBanner）
+// ════════════════════════════════════════════════════════════════════════════
+
+class _PageHeader extends StatelessWidget {
+  const _PageHeader({
+    required this.total,
+    required this.page,
+    required this.totalPages,
+    required this.filterCategory,
+    required this.categoryController,
+  });
+
+  final int total;
+  final int page;
+  final int totalPages;
+  final CategoryNode? filterCategory;
+  final CategoryController? categoryController;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final String? catPath = filterCategory != null && categoryController != null
+        ? categoryController!.buildPath(filterCategory!.id)
+        : null;
+
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.end,
+      children: <Widget>[
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Container(
+                  padding: const EdgeInsets.all(6),
+                  decoration: BoxDecoration(
+                    color: const Color(0xFF3B82F6).withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: const Icon(
+                    Icons.inventory_2_rounded,
+                    size: 20,
+                    color: Color(0xFF3B82F6),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '商品中心',
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ],
+            ),
+            if (catPath != null) ...<Widget>[
+              const SizedBox(height: 2),
+              Text(
+                '分类：$catPath',
+                style: TextStyle(fontSize: 11, color: cs.primary),
+              ),
+            ],
+          ],
+        ),
+        const Spacer(),
+        Text(
+          '共 $total 件 · $page/$totalPages 页',
+          style: Theme.of(context)
+              .textTheme
+              .bodySmall
+              ?.copyWith(color: cs.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// _FilterCard
 // ════════════════════════════════════════════════════════════════════════════
 
 class _FilterCard extends StatelessWidget {
@@ -335,27 +477,40 @@ class _FilterCard extends StatelessWidget {
     required this.keywordController,
     required this.barcodeController,
     required this.busy,
+    required this.filterCategory,
+    required this.categoryController,
     required this.onKeywordChanged,
     required this.onSearch,
     required this.onReset,
     required this.onScanBarcode,
+    required this.onPickCategory,
+    required this.onClearCategory,
   });
 
   final TextEditingController keywordController;
   final TextEditingController barcodeController;
   final bool busy;
+  final CategoryNode? filterCategory;
+  final CategoryController? categoryController;
   final ValueChanged<String> onKeywordChanged;
   final VoidCallback onSearch;
   final VoidCallback onReset;
   final VoidCallback onScanBarcode;
+  final VoidCallback onPickCategory;
+  final VoidCallback onClearCategory;
 
   @override
   Widget build(BuildContext context) {
+    final String catLabel = filterCategory != null && categoryController != null
+        ? (categoryController!.buildPath(filterCategory!.id) ??
+            filterCategory!.name)
+        : '全部分类';
+
     return SectionCard(
       title: '商品搜索',
-      subtitle: '关键字 400ms 防抖自动搜索，条码支持扫码枪',
       child: Column(
         children: <Widget>[
+          const SizedBox(height: 4),
           TextField(
             controller: keywordController,
             enabled: !busy,
@@ -389,6 +544,41 @@ class _FilterCard extends StatelessWidget {
               ),
             ),
           ),
+
+          // 分类筛选
+          if (categoryController != null) ...<Widget>[
+            const SizedBox(height: 8),
+            InkWell(
+              onTap: busy ? null : onPickCategory,
+              borderRadius: BorderRadius.circular(8),
+              child: InputDecorator(
+                decoration: InputDecoration(
+                  labelText: '分类筛选',
+                  border: const OutlineInputBorder(),
+                  isDense: true,
+                  prefixIcon:
+                      const Icon(Icons.category_outlined, size: 18),
+                  suffixIcon: filterCategory != null
+                      ? IconButton(
+                          icon: const Icon(Icons.close, size: 18),
+                          onPressed: busy ? null : onClearCategory,
+                          tooltip: '清除分类筛选',
+                        )
+                      : const Icon(Icons.expand_more, size: 18),
+                ),
+                child: Text(
+                  catLabel,
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: filterCategory != null
+                        ? Theme.of(context).colorScheme.onSurface
+                        : Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+            ),
+          ],
+
           const SizedBox(height: 10),
           Row(
             children: <Widget>[
@@ -412,43 +602,7 @@ class _FilterCard extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// List Header
-// ════════════════════════════════════════════════════════════════════════════
-
-class _ListHeader extends StatelessWidget {
-  const _ListHeader({
-    required this.total,
-    required this.page,
-    required this.totalPages,
-  });
-
-  final int total;
-  final int page;
-  final int totalPages;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: <Widget>[
-        Text(
-          '商品列表',
-          style: Theme.of(context)
-              .textTheme
-              .titleMedium
-              ?.copyWith(fontWeight: FontWeight.w700),
-        ),
-        const Spacer(),
-        Text(
-          '共 $total 件 · $page/$totalPages 页',
-          style: Theme.of(context).textTheme.bodySmall,
-        ),
-      ],
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Product Card
+// _ProductCard
 // ════════════════════════════════════════════════════════════════════════════
 
 class _ProductCard extends StatelessWidget {
@@ -457,66 +611,49 @@ class _ProductCard extends StatelessWidget {
     required this.canViewCostPrice,
     required this.canWrite,
     required this.busy,
+    required this.categoryController,
     required this.onEdit,
     required this.onDelete,
     this.onStockCheck,
+    this.onBatchManage,
   });
 
   final ProductData product;
   final bool canViewCostPrice;
   final bool canWrite;
   final bool busy;
+  final CategoryController? categoryController;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
-  /// 可选：点击「发起盘点」时调用
   final VoidCallback? onStockCheck;
+  final VoidCallback? onBatchManage;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
 
-    // Stock metrics
-    final int stock = product.currentStock;
-    final int limit = product.minStockLimit;
-    final bool isLowStock = limit > 0 && stock < limit;
-    final int shortage = isLowStock ? limit - stock : 0;
+    // 使用 extension 计算属性
+    final bool isLow = product.isLowStock;
+    final double progress = product.stockProgress;
+    final String? margin = canViewCostPrice ? product.grossMarginStr : null;
 
-    // Progress bar - relative to minStockLimit (or fallback to stock+20)
-    final double progressValue = limit > 0
-        ? (stock / limit).clamp(0.0, 1.0)
-        : stock <= 0
-            ? 0.0
-            : (stock / (stock + 20)).clamp(0.0, 1.0);
-
-    final Color stockBarColor = progressValue < 0.3
+    final Color stockBarColor = progress < 0.3
         ? cs.error
-        : progressValue < 0.6
+        : progress < 0.6
             ? const Color(0xFFF59E0B)
             : const Color(0xFF10B981);
 
-    // Price & profit — 均摊成本用于毛利率计算
-    final double? retailVal =
-        double.tryParse(product.retailPrice.replaceAll('¥', ''));
-    final double? avgCostVal = canViewCostPrice && product.costPrice != null
-        ? double.tryParse(product.costPrice!.replaceAll('¥', ''))
+    // 分类路径
+    final String? catPath = categoryController != null && product.categoryId != null
+        ? categoryController!.buildPath(product.categoryId)
         : null;
-    final double? lastInboundVal =
-        canViewCostPrice && product.lastInboundUnitCost != null
-            ? double.tryParse(
-                product.lastInboundUnitCost!.replaceAll('¥', ''))
-            : null;
-    // 毛利率基于加权均摊成本计算
-    final String? profitRateStr =
-        (retailVal != null && avgCostVal != null && retailVal > 0)
-            ? '${((retailVal - avgCostVal) / retailVal * 100).toStringAsFixed(1)}%'
-            : null;
 
     return Container(
       decoration: BoxDecoration(
         color: cs.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isLowStock
+          color: isLow
               ? cs.error.withValues(alpha: 0.35)
               : cs.outlineVariant,
         ),
@@ -530,13 +667,14 @@ class _ProductCard extends StatelessWidget {
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: canWrite ? null : onEdit, // readonly: tap to view
+        onTap: canWrite ? null : onEdit,
         child: Padding(
           padding: const EdgeInsets.all(14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              // ── Row 1: name + stock badge ──────────────────────────────
+
+              // ── Row 1: 商品名 + 库存徽章 ──────────────────────────────
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -557,14 +695,35 @@ class _ProductCard extends StatelessWidget {
                         Text(
                           'SKU：${product.sku.isEmpty ? '-' : product.sku}',
                           style: TextStyle(
-                              fontSize: 11,
-                              color: cs.onSurfaceVariant),
+                              fontSize: 11, color: cs.onSurfaceVariant),
                         ),
+                        // 分类路径
+                        if (catPath != null) ...<Widget>[
+                          const SizedBox(height: 2),
+                          Row(
+                            children: <Widget>[
+                              Icon(Icons.category_outlined,
+                                  size: 11, color: cs.primary),
+                              const SizedBox(width: 3),
+                              Expanded(
+                                child: Text(
+                                  catPath,
+                                  style: TextStyle(
+                                    fontSize: 11,
+                                    color: cs.primary,
+                                    fontWeight: FontWeight.w500,
+                                  ),
+                                  overflow: TextOverflow.ellipsis,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ],
                     ),
                   ),
                   const SizedBox(width: 10),
-                  // Stock badge
+                  // 库存徽章
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: <Widget>[
@@ -572,34 +731,34 @@ class _ProductCard extends StatelessWidget {
                         padding: const EdgeInsets.symmetric(
                             horizontal: 10, vertical: 4),
                         decoration: BoxDecoration(
-                          color: isLowStock
+                          color: isLow
                               ? cs.error.withValues(alpha: 0.12)
                               : const Color(0xFF10B981).withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(999),
                           border: Border.all(
-                            color: isLowStock
+                            color: isLow
                                 ? cs.error.withValues(alpha: 0.4)
                                 : const Color(0xFF10B981)
                                     .withValues(alpha: 0.4),
                           ),
                         ),
                         child: Text(
-                          isLowStock
-                              ? '库存 $stock / 需 $limit'
-                              : '库存 $stock',
+                          isLow
+                              ? '库存 ${product.currentStock} / 需 ${product.minStockLimit}'
+                              : '库存 ${product.currentStock}',
                           style: TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
-                            color: isLowStock
+                            color: isLow
                                 ? cs.error
                                 : const Color(0xFF059669),
                           ),
                         ),
                       ),
-                      if (isLowStock) ...<Widget>[
+                      if (isLow) ...<Widget>[
                         const SizedBox(height: 3),
                         Text(
-                          '差 $shortage 件',
+                          '差 ${product.shortage} 件',
                           style: TextStyle(
                               fontSize: 10,
                               color: cs.error,
@@ -607,16 +766,14 @@ class _ProductCard extends StatelessWidget {
                         ),
                       ],
                       const SizedBox(height: 4),
-                      // Progress bar
                       SizedBox(
                         width: 72,
                         child: ClipRRect(
                           borderRadius: BorderRadius.circular(3),
                           child: LinearProgressIndicator(
-                            value: progressValue,
+                            value: progress,
                             minHeight: 5,
-                            backgroundColor:
-                                cs.surfaceContainerHighest,
+                            backgroundColor: cs.surfaceContainerHighest,
                             valueColor: AlwaysStoppedAnimation<Color>(
                                 stockBarColor),
                           ),
@@ -629,7 +786,7 @@ class _ProductCard extends StatelessWidget {
 
               const SizedBox(height: 10),
 
-              // ── Row 2: barcode + unit ──────────────────────────────────
+              // ── Row 2: 条码 + 单位 ────────────────────────────────────
               Row(
                 children: <Widget>[
                   Icon(Icons.qr_code, size: 13, color: cs.onSurfaceVariant),
@@ -637,13 +794,14 @@ class _ProductCard extends StatelessWidget {
                   Expanded(
                     child: Text(
                       product.barcode.isEmpty ? '-' : product.barcode,
-                      style: TextStyle(
-                          fontSize: 12, color: cs.onSurfaceVariant),
+                      style:
+                          TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
                   const SizedBox(width: 8),
-                  Icon(Icons.straighten, size: 13, color: cs.onSurfaceVariant),
+                  Icon(Icons.straighten,
+                      size: 13, color: cs.onSurfaceVariant),
                   const SizedBox(width: 4),
                   Text(
                     '单位：${product.unit}',
@@ -654,17 +812,17 @@ class _ProductCard extends StatelessWidget {
               ),
               const SizedBox(height: 10),
 
-              // ── Row 3: prices ──────────────────────────────────────────
+              // ── Row 3: 价格区 ─────────────────────────────────────────
               Container(
-                padding: const EdgeInsets.symmetric(
-                    horizontal: 12, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                 decoration: BoxDecoration(
                   color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(10),
                 ),
                 child: Row(
                   children: <Widget>[
-                    // Retail price
+                    // 零售价
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: <Widget>[
@@ -694,8 +852,7 @@ class _ProductCard extends StatelessWidget {
                         children: <Widget>[
                           Text('均摊成本',
                               style: TextStyle(
-                                  fontSize: 10,
-                                  color: cs.onSurfaceVariant)),
+                                  fontSize: 10, color: cs.onSurfaceVariant)),
                           Text(
                             '¥${product.costPrice}',
                             style: TextStyle(
@@ -706,21 +863,19 @@ class _ProductCard extends StatelessWidget {
                           ),
                         ],
                       ),
-                      if (lastInboundVal != null) ...[
+                      if (product.lastInboundUnitCost != null) ...[
                         const SizedBox(width: 12),
                         Container(
                             width: 1,
                             height: 28,
-                            color:
-                                cs.outlineVariant.withValues(alpha: 0.5)),
+                            color: cs.outlineVariant.withValues(alpha: 0.5)),
                         const SizedBox(width: 12),
                         Column(
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: <Widget>[
                             Text('最近进货',
                                 style: TextStyle(
-                                    fontSize: 10,
-                                    color: cs.onSurfaceVariant)),
+                                    fontSize: 10, color: cs.onSurfaceVariant)),
                             Text(
                               '¥${product.lastInboundUnitCost}',
                               style: TextStyle(
@@ -733,18 +888,17 @@ class _ProductCard extends StatelessWidget {
                         ),
                       ],
                     ],
-                    if (profitRateStr != null) ...<Widget>[
+                    if (margin != null) ...<Widget>[
                       const Spacer(),
                       Container(
                         padding: const EdgeInsets.symmetric(
                             horizontal: 8, vertical: 3),
                         decoration: BoxDecoration(
-                          color: const Color(0xFF10B981)
-                              .withValues(alpha: 0.12),
+                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
-                          '📈 毛利 $profitRateStr',
+                          '📈 毛利 $margin',
                           style: const TextStyle(
                             fontSize: 11,
                             fontWeight: FontWeight.w700,
@@ -758,19 +912,22 @@ class _ProductCard extends StatelessWidget {
               ),
               const SizedBox(height: 10),
 
-              // ── Row 4: secondary info ─────────────────────────────────
-              Wrap(
-                spacing: 12,
-                runSpacing: 4,
+              // ── Row 4: 元数据 ─────────────────────────────────────────
+              Row(
                 children: <Widget>[
-                  _MetaChip(
-                      icon: Icons.warning_amber_rounded,
-                      label: '预警 ${product.minStockLimit}件'),
+                  Icon(Icons.warning_amber_rounded,
+                      size: 12, color: cs.onSurfaceVariant),
+                  const SizedBox(width: 3),
+                  Text(
+                    '预警 ${product.minStockLimit} 件',
+                    style:
+                        TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                  ),
                 ],
               ),
               const SizedBox(height: 10),
 
-              // ── Row 5: actions ────────────────────────────────────────
+              // ── Row 5: 操作按钮 ───────────────────────────────────────
               if (canWrite)
                 Row(
                   children: <Widget>[
@@ -786,15 +943,22 @@ class _ProductCard extends StatelessWidget {
                         icon: const Icon(
                             Icons.playlist_add_check_rounded,
                             size: 16),
-                        label: const Text('发起盘点'),
+                        label: const Text('盘点'),
+                      ),
+                      const SizedBox(width: 8),
+                    ],
+                    if (onBatchManage != null) ...<Widget>[
+                      OutlinedButton.icon(
+                        onPressed: busy ? null : onBatchManage,
+                        icon: const Icon(Icons.inventory_2_outlined, size: 16),
+                        label: const Text('批次'),
                       ),
                       const SizedBox(width: 8),
                     ],
                     TextButton.icon(
                       onPressed: busy ? null : onDelete,
                       style: TextButton.styleFrom(
-                        foregroundColor:
-                            Theme.of(context).colorScheme.error,
+                        foregroundColor: cs.error,
                       ),
                       icon: const Icon(Icons.delete_outline, size: 16),
                       label: const Text('删除'),
@@ -809,6 +973,14 @@ class _ProductCard extends StatelessWidget {
                       icon: const Icon(Icons.visibility_outlined, size: 16),
                       label: const Text('查看详情'),
                     ),
+                    if (onBatchManage != null) ...<Widget>[
+                      const SizedBox(width: 8),
+                      OutlinedButton.icon(
+                        onPressed: onBatchManage,
+                        icon: const Icon(Icons.inventory_2_outlined, size: 16),
+                        label: const Text('批次'),
+                      ),
+                    ],
                   ],
                 ),
             ],
@@ -820,63 +992,199 @@ class _ProductCard extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Pagination Bar
+// _CategoryFilterSheet — 分类筛选弹窗（三级平铺）
 // ════════════════════════════════════════════════════════════════════════════
 
-class _PaginationBar extends StatelessWidget {
-  const _PaginationBar({
-    required this.page,
-    required this.totalPages,
-    required this.loading,
-    required this.onPrev,
-    required this.onNext,
-  });
+class _CategoryFilterSheet extends StatefulWidget {
+  const _CategoryFilterSheet({required this.controller});
+  final CategoryController controller;
 
-  final int page;
-  final int totalPages;
-  final bool loading;
-  final VoidCallback? onPrev;
-  final VoidCallback? onNext;
+  static Future<CategoryNode?> show(
+      BuildContext context, CategoryController controller) {
+    return showModalBottomSheet<CategoryNode>(
+      context: context,
+      useSafeArea: true,
+      isScrollControlled: true,
+      builder: (_) => _CategoryFilterSheet(controller: controller),
+    );
+  }
+
+  @override
+  State<_CategoryFilterSheet> createState() => _CategoryFilterSheetState();
+}
+
+class _CategoryFilterSheetState extends State<_CategoryFilterSheet> {
+  CategoryNode? _l1;
+  CategoryNode? _l2;
 
   @override
   Widget build(BuildContext context) {
-    return Row(
-      children: <Widget>[
-        OutlinedButton.icon(
-          onPressed: loading ? null : onPrev,
-          icon: const Icon(Icons.chevron_left, size: 18),
-          label: const Text('上一页'),
+    final List<CategoryNode> l1s = widget.controller.tree;
+    final List<CategoryNode> l2s = _l1?.children ?? <CategoryNode>[];
+    final List<CategoryNode> l3s = _l2?.children ?? <CategoryNode>[];
+
+    return DraggableScrollableSheet(
+      expand: false,
+      initialChildSize: 0.55,
+      maxChildSize: 0.85,
+      builder: (_, controller) => Padding(
+        padding: const EdgeInsets.fromLTRB(16, 8, 16, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            // Handle
+            Center(
+              child: Container(
+                width: 36, height: 4,
+                decoration: BoxDecoration(
+                  color: Theme.of(context).dividerColor,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+            Row(
+              children: <Widget>[
+                const Text('按分类筛选',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w800)),
+                const Spacer(),
+                TextButton(
+                  onPressed: () => Navigator.of(context).pop(null),
+                  child: const Text('不限分类'),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            Expanded(
+              child: ListView(
+                controller: controller,
+                children: <Widget>[
+                  // 大类
+                  if (l1s.isNotEmpty) ...<Widget>[
+                    const SectionLabel(label: '大类'),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: l1s.map((CategoryNode n) {
+                        final bool sel = _l1?.id == n.id;
+                        return _CatChip(
+                          label: n.name,
+                          selected: sel,
+                          onTap: () {
+                            setState(() {
+                              _l1 = sel ? null : n;
+                              _l2 = null;
+                            });
+                          },
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                  // 中类
+                  if (l2s.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 12),
+                    const SectionLabel(label: '中类'),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: l2s.map((CategoryNode n) {
+                        final bool sel = _l2?.id == n.id;
+                        return _CatChip(
+                          label: n.name,
+                          selected: sel,
+                          onTap: () =>
+                              setState(() => _l2 = sel ? null : n),
+                        );
+                      }).toList(),
+                    ),
+                  ],
+                  // 小类
+                  if (l3s.isNotEmpty) ...<Widget>[
+                    const SizedBox(height: 12),
+                    const SectionLabel(label: '小类'),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 8,
+                      runSpacing: 6,
+                      children: l3s.map((CategoryNode n) => _CatChip(
+                            label: n.name,
+                            selected: false,
+                            onTap: () => Navigator.of(context).pop(n),
+                          )).toList(),
+                    ),
+                  ],
+                  // 若选中了大类/中类，直接可以用该层级筛选
+                  if (_l1 != null) ...<Widget>[
+                    const SizedBox(height: 20),
+                    SizedBox(
+                      width: double.infinity,
+                      child: FilledButton.icon(
+                        icon: const Icon(Icons.done, size: 16),
+                        label: Text(
+                          _l2 != null
+                              ? '筛选：${_l2!.name}'
+                              : '筛选：${_l1!.name}（全部子分类）',
+                        ),
+                        onPressed: () =>
+                            Navigator.of(context).pop(_l2 ?? _l1),
+                      ),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
         ),
-        const Spacer(),
-        Container(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
-          decoration: BoxDecoration(
-            color: Theme.of(context)
-                .colorScheme
-                .surfaceContainerHighest
-                .withValues(alpha: 0.6),
-            borderRadius: BorderRadius.circular(20),
+      ),
+    );
+  }
+}
+
+class _CatChip extends StatelessWidget {
+  const _CatChip({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+  });
+  final String label;
+  final bool selected;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 160),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        decoration: BoxDecoration(
+          color: selected
+              ? cs.primary.withValues(alpha: 0.15)
+              : cs.surfaceContainerHighest,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? cs.primary : cs.outlineVariant,
           ),
-          child: Text(
-            '第 $page / $totalPages 页',
-            style: const TextStyle(
-                fontSize: 13, fontWeight: FontWeight.w600),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 13,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.w400,
+            color: selected ? cs.primary : cs.onSurface,
           ),
         ),
-        const Spacer(),
-        OutlinedButton.icon(
-          onPressed: loading ? null : onNext,
-          icon: const Icon(Icons.chevron_right, size: 18),
-          label: const Text('下一页'),
-        ),
-      ],
+      ),
     );
   }
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Empty State
+// _EmptyState
 // ════════════════════════════════════════════════════════════════════════════
 
 class _EmptyState extends StatelessWidget {
@@ -902,21 +1210,22 @@ class _EmptyState extends StatelessWidget {
           const SizedBox(height: 16),
           Text(
             hasFilter ? '未找到匹配商品' : '暂无商品数据',
-            style: const TextStyle(
-                fontSize: 15, color: Color(0xFF64748B)),
+            style: const TextStyle(fontSize: 15, color: Color(0xFF64748B)),
           ),
           const SizedBox(height: 8),
           Text(
-            hasFilter ? '请尝试调整关键字或条码后重新查询' : '点击右下角「新建商品」按钮添加第一个商品',
-            style: const TextStyle(
-                fontSize: 13, color: Color(0xFF94A3B8)),
+            hasFilter
+                ? '请尝试调整关键字、条码或分类后重新查询'
+                : '点击右下角「新建商品」按钮添加第一个商品',
+            style: const TextStyle(fontSize: 13, color: Color(0xFF94A3B8)),
+            textAlign: TextAlign.center,
           ),
           if (hasFilter) ...<Widget>[
             const SizedBox(height: 16),
             OutlinedButton.icon(
               onPressed: onClearFilter,
               icon: const Icon(Icons.clear, size: 16),
-              label: const Text('清除筛选条件'),
+              label: const Text('清除所有筛选条件'),
             ),
           ],
         ],
@@ -926,7 +1235,7 @@ class _EmptyState extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// Skeleton Card
+// _SkeletonCard / _Bone
 // ════════════════════════════════════════════════════════════════════════════
 
 class _SkeletonCard extends StatelessWidget {
@@ -934,10 +1243,9 @@ class _SkeletonCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Color base =
-        Theme.of(context).colorScheme.surfaceContainerHighest;
+    final Color base = Theme.of(context).colorScheme.surfaceContainerHighest;
     return Container(
-      height: 180,
+      height: 200,
       decoration: BoxDecoration(
         color: base,
         borderRadius: BorderRadius.circular(16),
@@ -953,12 +1261,14 @@ class _SkeletonCard extends StatelessWidget {
               _Bone(width: 72, height: 24, base: base),
             ],
           ),
+          const SizedBox(height: 8),
+          _Bone(width: 120, height: 11, base: base),
+          const SizedBox(height: 6),
+          _Bone(width: 180, height: 11, base: base),
           const SizedBox(height: 10),
           _Bone(width: double.infinity, height: 52, base: base),
           const SizedBox(height: 10),
           _Bone(width: 200, height: 12, base: base),
-          const SizedBox(height: 8),
-          _Bone(width: 120, height: 12, base: base),
         ],
       ),
     );
@@ -980,410 +1290,4 @@ class _Bone extends StatelessWidget {
           borderRadius: BorderRadius.circular(6),
         ),
       );
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Meta Chip
-// ════════════════════════════════════════════════════════════════════════════
-
-class _MetaChip extends StatelessWidget {
-  const _MetaChip({required this.icon, required this.label});
-  final IconData icon;
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme cs = Theme.of(context).colorScheme;
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Icon(icon, size: 12, color: cs.onSurfaceVariant),
-        const SizedBox(width: 3),
-        Text(label,
-            style:
-                TextStyle(fontSize: 11, color: cs.onSurfaceVariant)),
-      ],
-    );
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Create Product Sheet
-// ════════════════════════════════════════════════════════════════════════════
-
-class CreateProductSheet extends StatefulWidget {
-  const CreateProductSheet({
-    super.key,
-    required this.controller,
-    required this.moneyPattern,
-    this.presetBarcode,
-  });
-
-  final ProductController controller;
-  final RegExp moneyPattern;
-  final String? presetBarcode;
-
-  @override
-  State<CreateProductSheet> createState() => _CreateProductSheetState();
-}
-
-class _CreateProductSheetState extends State<CreateProductSheet> {
-  final TextEditingController _skuController = TextEditingController();
-  final TextEditingController _barcodeController = TextEditingController();
-  final TextEditingController _nameController = TextEditingController();
-  final TextEditingController _unitController = TextEditingController();
-  final TextEditingController _retailPriceController =
-      TextEditingController();
-  final TextEditingController _initStockController =
-      TextEditingController(text: '0');
-  final TextEditingController _minStockLimitController =
-      TextEditingController(text: '0');
-  final TextEditingController _costPriceController =
-      TextEditingController();
-
-  String? _localError;
-
-  @override
-  void initState() {
-    super.initState();
-    final String presetBarcode = widget.presetBarcode?.trim() ?? '';
-    if (presetBarcode.isNotEmpty) {
-      _barcodeController.text = presetBarcode;
-    }
-  }
-
-  @override
-  void dispose() {
-    _skuController.dispose();
-    _barcodeController.dispose();
-    _nameController.dispose();
-    _unitController.dispose();
-    _retailPriceController.dispose();
-    _initStockController.dispose();
-    _minStockLimitController.dispose();
-    _costPriceController.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: widget.controller,
-      builder: (BuildContext context, Widget? child) {
-        final bool submitting = widget.controller.submitting;
-
-        return Padding(
-          padding: EdgeInsets.only(
-            left: 16,
-            right: 16,
-            top: 8,
-            bottom: MediaQuery.of(context).viewInsets.bottom + 16,
-          ),
-          child: SingleChildScrollView(
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                // Handle bar
-                Center(
-                  child: Container(
-                    width: 36,
-                    height: 4,
-                    decoration: BoxDecoration(
-                      color: Theme.of(context).dividerColor,
-                      borderRadius: BorderRadius.circular(2),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 14),
-                const Text(
-                  '新建商品',
-                  style: TextStyle(
-                      fontSize: 18, fontWeight: FontWeight.w800),
-                ),
-                const SizedBox(height: 16),
-
-                // ── Section 1: 基本信息 ───────────────────────────────
-                const _SectionLabel(label: '基本信息'),
-                const SizedBox(height: 8),
-                _buildField(
-                  controller: _skuController,
-                  label: 'SKU（可选）',
-                  hint: '留空由服务端自动生成',
-                  enabled: !submitting,
-                ),
-                const SizedBox(height: 8),
-                _buildField(
-                  controller: _barcodeController,
-                  label: '条码 *',
-                  hint: '支持手工/扫码枪/摄像头',
-                  enabled: !submitting,
-                  suffix: IconButton(
-                    tooltip: '扫码填入条码',
-                    onPressed: submitting ? null : _fillBarcodeByCamera,
-                    icon: const Icon(Icons.qr_code_scanner),
-                  ),
-                ),
-                const SizedBox(height: 8),
-                _buildField(
-                  controller: _nameController,
-                  label: '商品名称 *',
-                  hint: '例如：百事可乐 550ml',
-                  enabled: !submitting,
-                ),
-                const SizedBox(height: 8),
-                _buildField(
-                  controller: _unitController,
-                  label: '单位 *',
-                  hint: '例如：瓶、盒、个',
-                  enabled: !submitting,
-                ),
-                const SizedBox(height: 16),
-
-                // ── Section 2: 价格设定 ───────────────────────────────
-                const _SectionLabel(label: '价格设定'),
-                const SizedBox(height: 8),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: _buildField(
-                        controller: _retailPriceController,
-                        label: '零售价 *',
-                        hint: '3.50',
-                        enabled: !submitting,
-                        keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildField(
-                        controller: _costPriceController,
-                        label: '进货价格 *',
-                        hint: '2.10',
-                        enabled: !submitting,
-                        keyboardType: const TextInputType.numberWithOptions(
-                            decimal: true),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-
-                // ── Section 3: 库存设置 ───────────────────────────────
-                const _SectionLabel(label: '库存设置'),
-                const SizedBox(height: 8),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: _buildField(
-                        controller: _initStockController,
-                        label: '初始库存',
-                        hint: '默认 0',
-                        enabled: !submitting,
-                        keyboardType: TextInputType.number,
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: _buildField(
-                        controller: _minStockLimitController,
-                        label: '低库存预警阈值',
-                        hint: '默认 0（不预警）',
-                        enabled: !submitting,
-                        keyboardType: TextInputType.number,
-                      ),
-                    ),
-                  ],
-                ),
-
-                // Error
-                if (_localError != null) ...<Widget>[
-                  const SizedBox(height: 12),
-                  Container(
-                    padding: const EdgeInsets.symmetric(
-                        horizontal: 12, vertical: 8),
-                    decoration: BoxDecoration(
-                      color: Theme.of(context)
-                          .colorScheme
-                          .errorContainer,
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        Icon(Icons.error_outline,
-                            size: 16,
-                            color: Theme.of(context)
-                                .colorScheme
-                                .onErrorContainer),
-                        const SizedBox(width: 6),
-                        Expanded(
-                          child: Text(
-                            _localError!,
-                            style: TextStyle(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onErrorContainer,
-                              fontSize: 13,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 16),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: FilledButton(
-                        onPressed: submitting ? null : _submit,
-                        child:
-                            Text(submitting ? '创建中…' : '创建商品'),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: OutlinedButton(
-                        onPressed: submitting
-                            ? null
-                            : () => Navigator.of(context).pop(),
-                        child: const Text('取消'),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
-    );
-  }
-
-  Widget _buildField({
-    required TextEditingController controller,
-    required String label,
-    required String hint,
-    required bool enabled,
-    TextInputType? keyboardType,
-    Widget? suffix,
-  }) {
-    return TextField(
-      controller: controller,
-      enabled: enabled,
-      keyboardType: keyboardType,
-      decoration: InputDecoration(
-        labelText: label,
-        hintText: hint,
-        border: const OutlineInputBorder(),
-        isDense: true,
-        suffixIcon: suffix,
-      ),
-    );
-  }
-
-  Future<void> _fillBarcodeByCamera() async {
-    FocusScope.of(context).unfocus();
-    final String? barcode = await BarcodeScannerSheet.scan(
-      context,
-      title: '新建商品扫码',
-      hint: '识别成功后会自动回填到条码输入框。',
-    );
-    if (!mounted || barcode == null || barcode.isEmpty) return;
-    _barcodeController.text = barcode;
-  }
-
-  Future<void> _submit() async {
-    final String? err = _validateForm();
-    if (err != null) {
-      setState(() => _localError = err);
-      return;
-    }
-    setState(() => _localError = null);
-
-    final ProductData? created = await widget.controller.createProduct(
-      CreateProductRequest(
-        sku: _skuController.text.trim().isEmpty
-            ? null
-            : _skuController.text.trim(),
-        barcode: _barcodeController.text.trim(),
-        name: _nameController.text.trim(),
-        unit: _unitController.text.trim(),
-        retailPrice: _retailPriceController.text.trim(),
-        initStock: _parseInt(_initStockController.text),
-        minStockLimit: _parseInt(_minStockLimitController.text),
-        costPrice: _costPriceController.text.trim(),
-      ),
-    );
-
-    if (created != null && mounted) Navigator.of(context).pop(created);
-  }
-
-  String? _validateForm() {
-    if (_barcodeController.text.trim().isEmpty) return '条码不能为空';
-    if (_nameController.text.trim().isEmpty) return '商品名称不能为空';
-    if (_unitController.text.trim().isEmpty) return '单位不能为空';
-    if (!widget.moneyPattern
-        .hasMatch(_retailPriceController.text.trim())) {
-      return '零售价格式错误（示例：3.50）';
-    }
-    final String initStockRaw = _initStockController.text.trim();
-    if (initStockRaw.isNotEmpty) {
-      final int? v = _parseInt(initStockRaw);
-      if (v == null || v < 0) return '初始库存必须为大于等于 0 的整数';
-    }
-    final String minStockRaw = _minStockLimitController.text.trim();
-    if (minStockRaw.isNotEmpty) {
-      final int? v = _parseInt(minStockRaw);
-      if (v == null || v < 0) return '预警阈值必须为大于等于 0 的整数';
-    }
-    final String costRaw = _costPriceController.text.trim();
-    if (costRaw.isEmpty) return '进货价格不能为空';
-    if (!widget.moneyPattern.hasMatch(costRaw)) {
-      return '进货价格式错误（示例：2.10）';
-    }
-    return null;
-  }
-
-  int? _parseInt(String raw) {
-    final String v = raw.trim();
-    if (v.isEmpty) return null;
-    return int.tryParse(v);
-  }
-}
-
-// ════════════════════════════════════════════════════════════════════════════
-// Section Label
-// ════════════════════════════════════════════════════════════════════════════
-
-class _SectionLabel extends StatelessWidget {
-  const _SectionLabel({required this.label});
-  final String label;
-
-  @override
-  Widget build(BuildContext context) {
-    return Row(
-      children: <Widget>[
-        Container(
-          width: 3,
-          height: 14,
-          decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary,
-            borderRadius: BorderRadius.circular(2),
-          ),
-        ),
-        const SizedBox(width: 6),
-        Text(
-          label,
-          style: TextStyle(
-            fontWeight: FontWeight.w700,
-            fontSize: 13,
-            color: Theme.of(context).colorScheme.primary,
-          ),
-        ),
-      ],
-    );
-  }
 }

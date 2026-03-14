@@ -399,3 +399,38 @@ class PaginationBar extends StatelessWidget {
     );
   }
 }
+
+// ════════════════════════════════════════════════════════════════════════════
+// SectionLabel — 带左侧色条的分区标签（表单分节用）
+// ════════════════════════════════════════════════════════════════════════════
+
+class SectionLabel extends StatelessWidget {
+  const SectionLabel({super.key, required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    final Color primary = Theme.of(context).colorScheme.primary;
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 3,
+          height: 14,
+          decoration: BoxDecoration(
+            color: primary,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ),
+        const SizedBox(width: 6),
+        Text(
+          label,
+          style: TextStyle(
+            fontWeight: FontWeight.w700,
+            fontSize: 13,
+            color: primary,
+          ),
+        ),
+      ],
+    );
+  }
+}

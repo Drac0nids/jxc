@@ -82,6 +82,7 @@ class InboundResultData {
     required this.currentStock,
     required this.costPrice,
     required this.version,
+    this.trackBatches = false,
   });
 
   final String bizNo;
@@ -89,6 +90,7 @@ class InboundResultData {
   final int currentStock;
   final String costPrice;
   final int version;
+  final bool trackBatches;
 
   factory InboundResultData.fromJson(Map<String, dynamic> json) {
     return InboundResultData(
@@ -97,6 +99,7 @@ class InboundResultData {
       currentStock: _toInt(json['current_stock']),
       costPrice: (json['cost_price'] ?? '0').toString(),
       version: _toInt(json['version']),
+      trackBatches: json['track_batches'] == true,
     );
   }
 }
@@ -137,12 +140,14 @@ class InboundBatchItemResultData {
     required this.currentStock,
     required this.costPrice,
     required this.version,
+    this.trackBatches = false,
   });
 
   final int productId;
   final int currentStock;
   final String costPrice;
   final int version;
+  final bool trackBatches;
 
   factory InboundBatchItemResultData.fromJson(Map<String, dynamic> json) {
     return InboundBatchItemResultData(
@@ -150,6 +155,7 @@ class InboundBatchItemResultData {
       currentStock: _toInt(json['current_stock']),
       costPrice: (json['cost_price'] ?? '0').toString(),
       version: _toInt(json['version']),
+      trackBatches: json['track_batches'] == true,
     );
   }
 }

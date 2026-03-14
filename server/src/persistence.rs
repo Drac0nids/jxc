@@ -101,6 +101,14 @@ async fn apply_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
             "0009_tenants_tenant_code_login",
             include_str!("../migrations/0009_tenants_tenant_code_login.sql"),
         ),
+        (
+            "0010_categories",
+            include_str!("../migrations/0010_categories.sql"),
+        ),
+        (
+            "0011_product_batches",
+            include_str!("../migrations/0011_product_batches.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {

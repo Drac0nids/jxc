@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart';
 
 import 'core/app_services.dart';
 import 'core/theme/app_theme.dart';
@@ -6,6 +7,7 @@ import 'features/auth/application/session_controller.dart';
 import 'features/auth/presentation/auth_page.dart';
 import 'features/dashboard/application/dashboard_controller.dart';
 import 'features/dashboard/application/dashboard_orders_controller.dart';
+import 'features/dashboard/application/top_sales_controller.dart';
 import 'features/dashboard/application/trend_controller.dart';
 import 'features/dashboard/presentation/dashboard_page.dart';
 import 'features/inventory/application/inbound_controller.dart';
@@ -13,6 +15,8 @@ import 'features/inventory/application/inbound_logs_controller.dart';
 import 'features/inventory/application/outbound_controller.dart';
 import 'features/inventory/application/stock_check_controller.dart';
 import 'features/inventory/application/stock_check_logs_controller.dart';
+import 'features/products/application/batch_controller.dart';
+import 'features/products/application/category_controller.dart';
 import 'features/products/application/product_controller.dart';
 import 'features/products/application/low_stock_controller.dart';
 import 'features/users/application/users_controller.dart';
@@ -36,8 +40,11 @@ class _JxcAppState extends State<JxcApp> {
   StockCheckController? _stockCheckController;
   ProductController? _productController;
   LowStockController? _lowStockController;
+  CategoryController? _categoryController;
+  BatchController? _batchController;
   UsersController? _usersController;
   late final TrendController _trendController;
+  late final TopSalesController _topSalesController;
   String? _boundUserId;
 
   @override
@@ -57,6 +64,9 @@ class _JxcAppState extends State<JxcApp> {
     _trendController = TrendController(
       repository: _services.dashboardRepository,
     );
+    _topSalesController = TopSalesController(
+      repository: _services.dashboardRepository,
+    );
 
     _restoreSession();
   }
@@ -67,12 +77,16 @@ class _JxcAppState extends State<JxcApp> {
     _dashboardController.dispose();
     _dashboardOrdersController.dispose();
     _trendController.dispose();
+    _topSalesController.dispose();
     _inboundController?.dispose();
     _outboundController?.dispose();
     _inboundLogsController?.dispose();
     _stockCheckLogsController?.dispose();
     _stockCheckController?.dispose();
     _productController?.dispose();
+    _lowStockController?.dispose();
+    _categoryController?.dispose();
+    _batchController?.dispose();
     _usersController?.dispose();
     super.dispose();
 
@@ -97,6 +111,8 @@ class _JxcAppState extends State<JxcApp> {
         _stockCheckController != null &&
         _productController != null &&
         _lowStockController != null &&
+        _categoryController != null &&
+        _batchController != null &&
         _usersController != null) {
       return;
     }
@@ -131,6 +147,12 @@ class _JxcAppState extends State<JxcApp> {
     _lowStockController = LowStockController(
       repository: _services.productRepository,
     );
+    _categoryController = CategoryController(
+      repository: _services.categoryRepository,
+    );
+    _batchController = BatchController(
+      repository: _services.batchRepository,
+    );
     _usersController = UsersController(
       repository: _services.usersRepository,
     );
@@ -145,6 +167,8 @@ class _JxcAppState extends State<JxcApp> {
     _stockCheckController?.dispose();
     _productController?.dispose();
     _lowStockController?.dispose();
+    _categoryController?.dispose();
+    _batchController?.dispose();
     _usersController?.dispose();
     _inboundController = null;
     _outboundController = null;
@@ -153,6 +177,8 @@ class _JxcAppState extends State<JxcApp> {
     _stockCheckController = null;
     _productController = null;
     _lowStockController = null;
+    _categoryController = null;
+    _batchController = null;
     _usersController = null;
   }
 
@@ -164,6 +190,17 @@ class _JxcAppState extends State<JxcApp> {
       theme: JxcTheme.light(),
       darkTheme: JxcTheme.dark(),
       themeMode: ThemeMode.system,
+      // 全局中文化：日历、对话框、按钮文字等均显示中文
+      locale: const Locale('zh', 'CN'),
+      localizationsDelegates: const <LocalizationsDelegate<dynamic>>[
+        GlobalMaterialLocalizations.delegate,
+        GlobalWidgetsLocalizations.delegate,
+        GlobalCupertinoLocalizations.delegate,
+      ],
+      supportedLocales: const <Locale>[
+        Locale('zh', 'CN'),
+        Locale('en', 'US'),
+      ],
       home: AnimatedBuilder(
         animation: _sessionController,
         builder: (BuildContext context, Widget? child) {
@@ -188,6 +225,7 @@ class _JxcAppState extends State<JxcApp> {
             dashboardController: _dashboardController,
             dashboardOrdersController: _dashboardOrdersController,
             trendController: _trendController,
+            topSalesController: _topSalesController,
             lowStockController: _lowStockController!,
             inboundController: _inboundController!,
             outboundController: _outboundController!,
@@ -195,6 +233,8 @@ class _JxcAppState extends State<JxcApp> {
             stockCheckLogsController: _stockCheckLogsController!,
             stockCheckController: _stockCheckController!,
             productController: _productController!,
+            categoryController: _categoryController!,
+            batchController: _batchController!,
             usersController: _usersController!,
           );
         },

@@ -10,9 +10,11 @@ import '../application/inbound_controller.dart';
 import '../application/inbound_logs_controller.dart';
 import '../models/inventory_models.dart';
 import 'inbound_logs_page.dart';
+import '../../products/application/batch_controller.dart';
 import '../../products/application/product_controller.dart';
 import '../../products/models/product_models.dart';
-import '../../products/presentation/products_page.dart';
+import '../../products/presentation/batch_link_sheet.dart';
+import '../../products/presentation/create_product_sheet.dart';
 
 enum _InboundScanMode { scanConfirm, continuousScan }
 
@@ -60,6 +62,7 @@ class InboundPage extends StatefulWidget {
     required this.sessionStorage,
     required this.scanPreferenceScope,
     required this.logsController,
+    this.batchController,
   });
 
   final InboundController controller;
@@ -67,6 +70,7 @@ class InboundPage extends StatefulWidget {
   final SessionStorage sessionStorage;
   final String scanPreferenceScope;
   final InboundLogsController logsController;
+  final BatchController? batchController;
 
   @override
   State<InboundPage> createState() => _InboundPageState();
@@ -847,6 +851,65 @@ class _InboundPageState extends State<InboundPage> {
     _draftItems.clear();
     _resetScan();
     setState(() {});
+
+    // —— 批次关联弹窗（入库成功后） ——————————————————————————
+    final bc = widget.batchController;
+    if (bc == null || !mounted) return;
+
+    // 从入库结果中收集需要批次管理的商品（去重，每个商品弹一次）
+    final List<({int productId, String productName, bool trackBatches})>
+        pendingBatchProducts = [];
+    final Set<int> seen = {};
+
+    // 单条入库
+    final singleResult = widget.controller.result;
+    if (singleResult != null && singleResult.trackBatches) {
+      final int pid = singleResult.productId;
+      if (!seen.contains(pid)) {
+        seen.add(pid);
+        // 寻找对应的商品名
+        final String name = effectiveDraftItems
+            .firstWhere(
+              (i) => i.productId == pid.toString(),
+              orElse: () => effectiveDraftItems.first,
+            )
+            .productName;
+        pendingBatchProducts.add(
+          (productId: pid, productName: name, trackBatches: true),
+        );
+      }
+    }
+
+    // 批量入库
+    final batchResult = widget.controller.batchResult;
+    if (batchResult != null) {
+      for (final item in batchResult.items) {
+        if (item.trackBatches && !seen.contains(item.productId)) {
+          seen.add(item.productId);
+          final String name = effectiveDraftItems
+              .firstWhere(
+                (d) => d.productId == item.productId.toString(),
+                orElse: () => effectiveDraftItems.first,
+              )
+              .productName;
+          pendingBatchProducts.add(
+            (productId: item.productId, productName: name, trackBatches: true),
+          );
+        }
+      }
+    }
+
+    // 逐一弹出 BatchLinkSheet
+    for (final p in pendingBatchProducts) {
+      if (!mounted) break;
+      // ignore: use_build_context_synchronously
+      await BatchLinkSheet.show(
+        context,
+        productId: p.productId,
+        productName: p.productName,
+        controller: bc,
+      );
+    }
   }
 
   void _resetForm() {

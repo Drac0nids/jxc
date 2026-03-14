@@ -2,7 +2,7 @@
 
 | 文档属性 | 内容 |
 | --- | --- |
-| 版本 | v1.3.0（新增：经营趋势查询接口 `GET /reports/trend`） |
+| 版本 | v1.4.1（新增：商品 `track_batches` 字段、入库响应返回 `track_batches`、入库批次关联客户端约定） |
 | Base URL | `https://api.yoursaas.com/api/v1` |
 | 协议 | HTTPS + JSON |
 | 鉴权 | `Authorization: Bearer <access_token>` |
@@ -1483,3 +1483,308 @@
    - 商品/入库/出库既有写接口。
 4. 写接口幂等规则保持不变：`X-Idempotency-Key` 仍为必填，`4092` 语义不变。
 5. 权限与数据可见性规则保持不变：`4030`、`4040`、`4091` 等错误处理流程保持一致。
+
+---
+
+## 17. 商品批次管理 API（v1.4.0 新增）
+
+批次信息用于追踪商品的入库日期、生产日期与过期日期，并支持临期预警。
+
+### 17.1 创建批次
+
+- **POST** `/products/{product_id}/batches`
+- **鉴权**：是
+- **权限**：`OWNER`、`PURCHASER`
+- **Header**：要求 `X-Idempotency-Key`
+
+**请求体**
+```json
+{
+  "lot_number": "LOT-20260314-01",
+  "inbound_at": "2026-03-14",
+  "produced_at": "2026-02-01",
+  "expires_at": "2027-02-01",
+  "notes": "第一批进货"
+}
+```
+
+| 字段 | 必填 | 说明 |
+|---|---|---|
+| `lot_number` | 否 | 批次号，不填则为空 |
+| `inbound_at` | 是 | 入库日期 `YYYY-MM-DD` |
+| `produced_at` | 否 | 生产日期 `YYYY-MM-DD` |
+| `expires_at` | 否 | 过期日期 `YYYY-MM-DD` |
+| `notes` | 否 | 备注 |
+
+**响应 `data`**
+```json
+{
+  "id": 1,
+  "product_id": 1001,
+  "lot_number": "LOT-20260314-01",
+  "inbound_at": "2026-03-14",
+  "produced_at": "2026-02-01",
+  "expires_at": "2027-02-01",
+  "is_sold_out": false,
+  "notes": "第一批进货",
+  "expiry_level": "ok",
+  "days_until_expiry": 324,
+  "created_at": "2026-03-14T08:00:00Z"
+}
+```
+
+**字段说明**
+- `expiry_level`：临期等级，枚举値 `expired / critical / warning / notice / ok / null`（无过期日期时为 `null`）
+- `days_until_expiry`：距过期天数，无过期日期时为 `null`；已过期时为负数
+
+**错误语义**
+- `product_id` 不存在：`4040`
+- `inbound_at` 格式错误：`4000`
+- 权限不足：`4030`
+
+### 17.2 查询商品批次列表
+
+- **GET** `/products/{product_id}/batches?only_active=false`
+- **鉴权**：是
+- **权限**：`OWNER`、`PURCHASER`、`SALES`
+
+**Query 参数**
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `only_active` | 否 | `true` 不返回已售完批次，默认 `false` |
+
+**响应 `data`**
+```json
+{
+  "product_id": 1001,
+  "batches": [
+    {
+      "id": 1,
+      "lot_number": "LOT-20260314-01",
+      "inbound_at": "2026-03-14",
+      "produced_at": "2026-02-01",
+      "expires_at": "2027-02-01",
+      "is_sold_out": false,
+      "expiry_level": "ok",
+      "days_until_expiry": 324,
+      "notes": "第一批进货",
+      "created_at": "2026-03-14T08:00:00Z"
+    }
+  ]
+}
+```
+
+### 17.3 更新批次
+
+- **PUT** `/products/{product_id}/batches/{batch_id}`
+- **鉴权**：是
+- **权限**：`OWNER`、`PURCHASER`
+- **Header**：要求 `X-Idempotency-Key`
+
+**请求体**（均为可选字段，不传则不修改）
+```json
+{
+  "lot_number": "LOT-NEW",
+  "produced_at": "2026-02-15",
+  "expires_at": "2027-02-15",
+  "notes": "更新备注"
+}
+```
+
+**错误语义**
+- `batch_id` 不存在：`4040`
+- 权限不足：`4030`
+
+### 17.4 标记批次售完
+
+- **POST** `/products/{product_id}/batches/{batch_id}/sold-out`
+- **鉴权**：是
+- **权限**：`OWNER`、`PURCHASER`
+- **Header**：要求 `X-Idempotency-Key`
+- **请求体**：无（空体）
+
+**实现语义**：将 `is_sold_out = true`，结果不在临期预警查询中返回。
+
+**错误语义**
+- `batch_id` 不存在：`4040`
+- 已经售完：`4000`（重复标记）
+- 权限不足：`4030`
+
+### 17.5 删除批次
+
+- **DELETE** `/products/{product_id}/batches/{batch_id}`
+- **鉴权**：是
+- **权限**：`OWNER`、`PURCHASER`
+- **Header**：要求 `X-Idempotency-Key`
+
+**错误语义**
+- `batch_id` 不存在：`4040`
+- 权限不足：`4030`
+
+### 17.6 查询临期批次列表（首页预警）
+
+- **GET** `/products/batches/expiring?days=30`
+- **鉴权**：是
+- **权限**：`OWNER`、`PURCHASER`、`SALES`
+
+**Query 参数**
+
+| 参数 | 必填 | 说明 |
+|---|---|---|
+| `days` | 否 | 预警天数窗口，默认 `30` |
+
+**响应 `data`**
+```json
+{
+  "days": 30,
+  "total": 2,
+  "batches": [
+    {
+      "id": 5,
+      "product_id": 1001,
+      "product_name": "可口可乐 330ml",
+      "lot_number": "LOT-OLD",
+      "inbound_at": "2025-12-01",
+      "expires_at": "2026-03-20",
+      "expiry_level": "critical",
+      "days_until_expiry": 6,
+      "is_sold_out": false
+    },
+    {
+      "id": 8,
+      "product_id": 1002,
+      "product_name": "百事可乐 500ml",
+      "lot_number": null,
+      "inbound_at": "2026-02-10",
+      "expires_at": "2026-04-01",
+      "expiry_level": "notice",
+      "days_until_expiry": 18,
+      "is_sold_out": false
+    }
+  ]
+}
+```
+
+**字段说明**
+- 仅返回 `is_sold_out = false` 且 `expires_at ≤ 今天 + days` 的批次
+- 按 `days_until_expiry` 升序排列（最紧迫的排最前）
+- `product_name` 由后端联报商品表注入
+
+**dashboard 高速缓存建议**
+- 该接口首页刷新时调用，建议设置短期缓存（5分钟）阿免频繁查询。
+
+### 17.7 权限范围补充
+
+| 操作 | OWNER | PURCHASER | SALES |
+|---|---|---|---|
+| 查看批次列表/临期 | ✅ | ✅ | ✅ |
+| 创建/编辑批次 | ✅ | ✅ | ✖️ |
+| 标记售完 | ✅ | ✅ | ✖️ |
+| 删除批次 | ✅ | ✅ | ✖️ |
+
+---
+
+## 18. 商品批次追踪开关与入库批次关联（v1.4.1 新增）
+
+### 18.1 商品接口 `track_batches` 字段变更
+
+**受影响接口**：`POST /products`、`PUT /products/{id}`、`GET /products`
+
+#### 18.1.1 创建/更新商品请求体（新增可选字段）
+
+```json
+{
+  "name": "可口可乐 330ml",
+  "track_batches": true
+}
+```
+
+| 字段 | 类型 | 必填 | 说明 |
+|---|---|---|---|
+| `track_batches` | `bool` | 否 | 是否启用批次追踪，默认 `false`；`true` 时入库成功后客户端自动弹批次关联弹窗 |
+
+#### 18.1.2 商品响应新增字段
+
+```json
+{
+  "id": 1001,
+  "name": "可口可乐 330ml",
+  "track_batches": true,
+  ...
+}
+```
+
+- 所有 `GET /products`、`GET /products/{id}` 响应均新增 `track_batches` 字段。
+- 历史商品缺失时默认视为 `false`（服务端兼容处理）。
+
+### 18.2 入库接口响应新增 `track_batches`
+
+**受影响接口**：`POST /inventory/inbound`、`POST /inventory/inbound/batch`
+
+#### 18.2.1 单条入库响应变更
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "biz_no": "IN-20260314-001",
+    "product_id": 1001,
+    "current_stock": 120,
+    "cost_price": "2.1000",
+    "version": 5,
+    "track_batches": true
+  },
+  "request_id": "req_xxx"
+}
+```
+
+#### 18.2.2 批量入库响应变更
+
+```json
+{
+  "code": 200,
+  "message": "success",
+  "data": {
+    "biz_no": "IN-BATCH-20260314-001",
+    "items": [
+      {
+        "product_id": 1001,
+        "current_stock": 120,
+        "cost_price": "2.1000",
+        "version": 5,
+        "track_batches": true
+      },
+      {
+        "product_id": 1002,
+        "current_stock": 50,
+        "cost_price": "5.5000",
+        "version": 3,
+        "track_batches": false
+      }
+    ]
+  },
+  "request_id": "req_xxx"
+}
+```
+
+**字段说明**：
+- `track_batches`：客户端根据此字段决定是否为该商品弹出批次关联弹窗。
+- 服务端仅返回标记，**不自动创建批次**，批次的创建/关联由客户端通过现有批次 CRUD 接口完成。
+
+### 18.3 入库批次关联客户端约定
+
+1. 入库成功后，客户端从响应中筛选 `track_batches = true` 的商品，按 `product_id` 去重后得到需要处理的商品集合。
+2. 对每个商品依次展示"批次关联弹窗"（模态底部弹窗），弹窗内提供：
+   - **选择已有批次**：调用 `GET /products/{product_id}/batches?only_active=true` 获取候选列表，用户选择后记录（当前版本仅客户端备忘，不落服务端关联表）。
+   - **新建批次**：调用 `POST /products/{product_id}/batches` 创建新批次。
+   - **跳过**：关闭弹窗，不做任何操作。
+3. 弹窗为模态，不可通过点击背景关闭；必须通过"选择/新建/跳过"三选一操作。
+4. 同一商品多次扫码合并为一条明细，只弹一次弹窗。
+
+### 18.4 兼容约束
+
+1. 旧版客户端不传 `track_batches`，服务端创建商品时默认 `false`，行为不变。
+2. 现有批次 CRUD 接口（`/products/{id}/batches/*`）语义不变，`track_batches` 仅影响入库后的客户端弹窗触发逻辑。
+3. 不引入新的库存流水类型或错误码，权限模型保持不变。

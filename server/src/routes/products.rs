@@ -402,6 +402,10 @@ pub async fn list_products(
         filtered.sort_by_key(|p| p.id);
     }
 
+    if let Some(cat_id) = query.category_id {
+        filtered.retain(|p| p.category_id == Some(cat_id));
+    }
+
     let total = filtered.len() as u64;
     let start = ((page - 1) * page_size) as usize;
     let end = usize::min(start + page_size as usize, filtered.len());
@@ -579,6 +583,8 @@ pub async fn create_product(
             min_stock_limit,
             version: 1,
             is_deleted: false,
+            category_id: req.category_id,
+            track_batches: req.track_batches.unwrap_or(false),
         };
 
         state.repository.create_product(pool, &product).await?;
@@ -659,6 +665,8 @@ pub async fn create_product(
         min_stock_limit,
         version: 1,
         is_deleted: false,
+        category_id: None, // 内存模式不支持分类
+        track_batches: false,
     };
 
     products.insert(product.id, product.clone());
@@ -753,6 +761,8 @@ pub async fn update_product(
         && name.is_none()
         && unit.is_none()
         && retail_price.is_none()
+        && req.category_id.is_none()
+        && req.track_batches.is_none()
     {
         return Err(AppError::bad_request("至少提供一个可更新字段").with_request_id(request_id));
     }
@@ -829,6 +839,8 @@ pub async fn update_product(
             min_stock_limit: new_min_stock_limit,
             version: existing.version + 1,
             is_deleted: existing.is_deleted,
+            category_id: req.category_id.or(existing.category_id),
+            track_batches: req.track_batches.unwrap_or(existing.track_batches),
         };
 
         state
@@ -923,6 +935,9 @@ pub async fn update_product(
     product.retail_price = new_retail_price.round_dp(4);
     product.min_stock_limit = new_min_stock_limit;
     product.version += 1;
+    if let Some(tb) = req.track_batches {
+        product.track_batches = tb;
+    }
     let updated = product.clone();
 
     if new_barcode != existing.barcode {

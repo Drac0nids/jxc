@@ -19,6 +19,13 @@ const alerts = ref<LowStockAlertData[]>([])
 const total = ref(0)
 const activeCount = ref(0)
 
+function calcStockRatio(item: LowStockAlertData): number {
+  if (item.min_stock_limit <= 0) {
+    return item.current_stock > 0 ? 100 : 0
+  }
+  return Math.max(0, Math.min(100, (item.current_stock / item.min_stock_limit) * 100))
+}
+
 async function fetchAlerts(): Promise<void> {
   loading.value = true
   errorText.value = ''
@@ -89,6 +96,12 @@ onMounted(() => {
       共 {{ total }} 条，预警中 {{ activeCount }} 条，当前第 {{ query.page }} 页
     </p>
 
+    <div v-if="loading && alerts.length === 0" class="page-skeleton" style="margin-bottom: 10px">
+      <div class="skeleton-item h-24" />
+      <div class="skeleton-item h-44" />
+      <div class="skeleton-item h-44" />
+    </div>
+
     <div class="table-wrapper">
       <table class="data-table">
         <thead>
@@ -104,13 +117,20 @@ onMounted(() => {
         </thead>
         <tbody>
           <tr v-for="item in alerts" :key="item.product_id">
-            <td>{{ item.product_id }}</td>
-            <td>{{ item.sku }}</td>
-            <td>{{ item.barcode }}</td>
+            <td class="mono-number">{{ item.product_id }}</td>
+            <td class="cell-muted">{{ item.sku }}</td>
+            <td class="cell-muted">{{ item.barcode }}</td>
             <td>{{ item.name }}</td>
-            <td>{{ item.current_stock }}</td>
-            <td>{{ item.min_stock_limit }}</td>
-            <td :class="{ 'warn-text': item.shortage_qty > 0 }">{{ item.shortage_qty }}</td>
+            <td>
+              <div class="stock-ratio">
+                <span class="mono-number">{{ item.current_stock }}</span>
+                <div class="stock-ratio-track" aria-hidden="true">
+                  <div class="stock-ratio-fill" :style="{ width: `${calcStockRatio(item)}%` }" />
+                </div>
+              </div>
+            </td>
+            <td class="mono-number">{{ item.min_stock_limit }}</td>
+            <td class="mono-number" :class="{ 'warn-text': item.shortage_qty > 0 }">{{ item.shortage_qty }}</td>
           </tr>
           <tr v-if="!loading && alerts.length === 0">
             <td colspan="7" class="empty-cell">暂无数据</td>

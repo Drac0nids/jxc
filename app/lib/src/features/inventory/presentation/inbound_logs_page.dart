@@ -155,13 +155,6 @@ class _InboundLogsPageState extends State<InboundLogsPage> {
         return Scaffold(
           appBar: AppBar(
             title: const Text('入库记录'),
-            actions: <Widget>[
-              IconButton(
-                tooltip: '刷新',
-                onPressed: loading ? null : () => _query(resetPage: false),
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
           ),
           body: RefreshIndicator(
             onRefresh: () => _query(resetPage: false),

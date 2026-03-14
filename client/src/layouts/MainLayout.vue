@@ -13,22 +13,23 @@ const router = useRouter()
 interface NavItem {
   to: string
   label: string
+  iconClass: string
   roles?: string[]
 }
 
 const navItems: NavItem[] = [
-  { to: '/dashboard', label: '经营看板' },
-  { to: '/users', label: '员工管理', roles: ['OWNER'] },
-  { to: '/products', label: '商品列表' },
-  { to: '/inbound', label: '采购入库', roles: ['OWNER', 'PURCHASER'] },
-  { to: '/purchase-orders', label: '采购单状态流', roles: ['OWNER', 'PURCHASER'] },
-  { to: '/stock-checks', label: '库存盘点状态流', roles: ['OWNER', 'PURCHASER'] },
-  { to: '/sales-orders', label: '销售单状态流', roles: ['OWNER', 'SALES'] },
-  { to: '/outbound', label: '销售出库', roles: ['OWNER', 'SALES'] },
-  { to: '/sales-report', label: '销售报表' },
-  { to: '/low-stock', label: '低库存预警', roles: ['OWNER', 'PURCHASER'] },
-  { to: '/stock-logs', label: '库存流水', roles: ['OWNER', 'PURCHASER'] },
-  { to: '/audit-logs', label: '审计日志', roles: ['OWNER'] },
+  { to: '/dashboard', label: '经营看板', iconClass: 'dashboard' },
+  { to: '/users', label: '员工管理', iconClass: 'users', roles: ['OWNER'] },
+  { to: '/products', label: '商品列表', iconClass: 'products' },
+  { to: '/inbound', label: '采购入库', iconClass: 'inbound', roles: ['OWNER', 'PURCHASER'] },
+  { to: '/purchase-orders', label: '采购单状态流', iconClass: 'purchase', roles: ['OWNER', 'PURCHASER'] },
+  { to: '/stock-checks', label: '库存盘点状态流', iconClass: 'checks', roles: ['OWNER', 'PURCHASER'] },
+  { to: '/sales-orders', label: '销售单状态流', iconClass: 'sales', roles: ['OWNER', 'SALES'] },
+  { to: '/outbound', label: '销售出库', iconClass: 'outbound', roles: ['OWNER', 'SALES'] },
+  { to: '/sales-report', label: '销售报表', iconClass: 'report' },
+  { to: '/low-stock', label: '低库存预警', iconClass: 'lowstock', roles: ['OWNER', 'PURCHASER'] },
+  { to: '/stock-logs', label: '库存流水', iconClass: 'logs', roles: ['OWNER', 'PURCHASER'] },
+  { to: '/audit-logs', label: '审计日志', iconClass: 'audit', roles: ['OWNER'] },
 ]
 
 const userLabel = computed(() => authStore.session?.user.name ?? '-')
@@ -89,6 +90,7 @@ async function logout(): Promise<void> {
           class="layout-nav-link"
           :class="{ 'is-active': isActive(item.to) }"
         >
+          <span class="nav-icon" :class="`nav-icon-${item.iconClass}`" aria-hidden="true" />
           {{ item.label }}
         </RouterLink>
       </nav>

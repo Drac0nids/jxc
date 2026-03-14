@@ -1,5 +1,7 @@
 pub mod audit;
 pub mod auth;
+pub mod batches;
+pub mod categories;
 pub mod common;
 pub mod inventory;
 pub mod products;
@@ -13,7 +15,7 @@ use axum::{
     Json, Router,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, patch, post},
+    routing::{get, patch, post, put},
 };
 use serde_json::json;
 
@@ -120,6 +122,21 @@ pub fn protected_routes() -> Router<AppState> {
         .route("/inventory/inbound", post(inventory::inbound))
         .route("/inventory/inbound/batch", post(inventory::inbound_batch))
         .route("/inventory/outbound", post(inventory::outbound))
+        // 分类
+        .route("/categories/tree", get(categories::list_category_tree))
+        .route("/categories", post(categories::create_category))
+        .route(
+            "/categories/:id",
+            put(categories::update_category).delete(categories::delete_category),
+        )
+        // 批次
+        .route("/batches", get(batches::list_batches).post(batches::create_batch))
+        .route("/batches/expiring", get(batches::list_expiring_batches))
+        .route(
+            "/batches/:id",
+            put(batches::update_batch).delete(batches::delete_batch),
+        )
+        .route("/batches/:id/sold-out", post(batches::mark_sold_out))
 }
 
 pub async fn health(headers: HeaderMap) -> Response {

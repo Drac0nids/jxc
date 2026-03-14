@@ -35,6 +35,11 @@ pub struct AppConfig {
     pub database_url: Option<String>,
     pub redis_url: Option<String>,
     pub postgres_max_connections: u32,
+    pub barcode_lookup_api_url: Option<String>,
+    pub barcode_lookup_api_key: Option<String>,
+    pub barcode_lookup_timeout_ms: u64,
+    pub barcode_lookup_found_ttl_secs: i64,
+    pub barcode_lookup_not_found_ttl_secs: i64,
 }
 
 impl AppConfig {
@@ -71,6 +76,21 @@ impl AppConfig {
             .ok()
             .and_then(|v| v.parse::<u32>().ok())
             .unwrap_or(10);
+        let barcode_lookup_api_url = env::var("BARCODE_LOOKUP_API_URL").ok().and_then(non_empty);
+        let barcode_lookup_api_key = env::var("BARCODE_LOOKUP_API_KEY").ok().and_then(non_empty);
+        let barcode_lookup_timeout_ms = env::var("BARCODE_LOOKUP_TIMEOUT_MS")
+            .ok()
+            .and_then(|v| v.parse::<u64>().ok())
+            .unwrap_or(3000);
+        let barcode_lookup_found_ttl_secs = env::var("BARCODE_LOOKUP_FOUND_TTL_SECS")
+            .ok()
+            .and_then(|v| v.parse::<i64>().ok())
+            .unwrap_or(2_592_000);
+        let barcode_lookup_not_found_ttl_secs =
+            env::var("BARCODE_LOOKUP_NOT_FOUND_TTL_SECS")
+                .ok()
+                .and_then(|v| v.parse::<i64>().ok())
+                .unwrap_or(86_400);
 
         Self {
             host,
@@ -83,6 +103,11 @@ impl AppConfig {
             database_url,
             redis_url,
             postgres_max_connections,
+            barcode_lookup_api_url,
+            barcode_lookup_api_key,
+            barcode_lookup_timeout_ms,
+            barcode_lookup_found_ttl_secs,
+            barcode_lookup_not_found_ttl_secs,
         }
     }
 }

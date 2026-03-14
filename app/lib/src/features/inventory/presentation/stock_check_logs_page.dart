@@ -184,13 +184,6 @@ class _StockCheckLogsPageState extends State<StockCheckLogsPage> {
         return Scaffold(
           appBar: AppBar(
             title: const Text('盘点历史流水'),
-            actions: <Widget>[
-              IconButton(
-                tooltip: '刷新',
-                onPressed: loading ? null : () => _query(resetPage: false),
-                icon: const Icon(Icons.refresh),
-              ),
-            ],
           ),
           body: RefreshIndicator(
             onRefresh: () => _query(resetPage: false),

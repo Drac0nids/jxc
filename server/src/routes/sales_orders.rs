@@ -4,28 +4,29 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
+use chrono::Utc;
 use serde_json::json;
-use chrono::{Utc};
 
+use crate::routes::common::{
+    OrderActionRequest, SalesOrderCreateRequest, SalesOrderReturnRequest, append_audit_log,
+    ensure_role, generate_server_biz_no, parse_decimal, postgres_pool_or_none,
+    require_idempotency_key, sales_order_snapshot, save_idempotency_record,
+    save_idempotency_record_sync, to_sales_order_data_with_product_names, try_idempotent_replay,
+};
 use crate::{
     error::AppError,
-    middleware::{AuthContext},
+    extractors::AppJson,
+    middleware::AuthContext,
     models::{SalesOrderItem, SalesOrderStatus, StockLog},
     response::{ApiResponse, build_response_headers, resolve_request_id},
     state::AppState,
-};
-use crate::routes::common::{
-    postgres_pool_or_none, ensure_role, parse_decimal, parse_required_text,
-    require_idempotency_key, try_idempotent_replay, save_idempotency_record, save_idempotency_record_sync,
-    to_sales_order_data, sales_order_snapshot, append_audit_log,
-    SalesOrderCreateRequest, SalesOrderReturnRequest, OrderActionRequest
 };
 
 pub async fn create_sales_order(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
-    Json(req): Json<SalesOrderCreateRequest>,
+    AppJson(req): AppJson<SalesOrderCreateRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "SALES"], &request_id)?;
@@ -44,7 +45,6 @@ pub async fn create_sales_order(
         return Ok(replayed);
     }
 
-    let biz_no = parse_required_text(&req.biz_no, "biz_no", &request_id)?;
     if req.items.is_empty() {
         return Err(AppError::bad_request("items 不能为空").with_request_id(request_id));
     }
@@ -60,14 +60,15 @@ pub async fn create_sales_order(
             qty: item.qty,
             sell_price,
             returned_qty: 0,
+            product_name_snapshot: None,
         });
     }
 
     if state.repository.is_postgres() {
         let pool = postgres_pool_or_none(&state);
 
-        for item in &items {
-            state
+        for item in &mut items {
+            let product = state
                 .repository
                 .find_product_by_id(pool, auth.tenant_id, item.product_id, false)
                 .await
@@ -75,24 +76,126 @@ pub async fn create_sales_order(
                 .ok_or_else(|| {
                     AppError::not_found("商品不存在").with_request_id(request_id.clone())
                 })?;
-        }
-
-        if state
-            .repository
-            .is_sales_order_biz_no_taken(pool, auth.tenant_id, &biz_no)
-            .await
-            .map_err(|err| err.with_request_id(request_id.clone()))?
-        {
-            return Err(AppError::conflict(4090, "销售单号已存在")
-                .with_data(json!({ "biz_no": biz_no }))
-                .with_request_id(request_id));
+            item.product_name_snapshot = Some(product.name);
         }
 
         let id = state
             .repository
-            .next_sales_order_id(pool).await
+            .next_sales_order_id(pool)
+            .await
             .map_err(|err| err.with_request_id(request_id.clone()))?;
         let now = Utc::now().to_rfc3339();
+
+        for _ in 0..8 {
+            let biz_no = generate_server_biz_no("SO");
+            if state
+                .repository
+                .is_sales_order_biz_no_taken(pool, auth.tenant_id, &biz_no)
+                .await
+                .map_err(|err| err.with_request_id(request_id.clone()))?
+            {
+                continue;
+            }
+
+            let order = crate::models::SalesOrder {
+                id,
+                tenant_id: auth.tenant_id,
+                biz_no,
+                customer_id: req.customer_id,
+                status: SalesOrderStatus::Draft,
+                items: items.clone(),
+                remark: req.remark.clone(),
+                created_by: auth.user_id,
+                version: 1,
+                confirmed_at: None,
+                returned_at: None,
+                voided_at: None,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            };
+
+            match state.repository.create_sales_order(pool, &order).await {
+                Ok(_) => {
+                    let body = ApiResponse::success(
+                        to_sales_order_data_with_product_names(
+                            &state,
+                            auth.tenant_id,
+                            &request_id,
+                            &order,
+                        )
+                        .await?,
+                        request_id.clone(),
+                    );
+                    let response_body = serde_json::to_value(&body).map_err(|_| {
+                        AppError::internal("销售单创建响应序列化失败")
+                            .with_request_id(request_id.clone())
+                    })?;
+                    save_idempotency_record(&state, &scope_key, request_payload, response_body)
+                        .await?;
+
+                    return Ok((
+                        StatusCode::OK,
+                        build_response_headers(&request_id, false),
+                        Json(body),
+                    )
+                        .into_response());
+                }
+                Err(err) => {
+                    let err = err.with_request_id(request_id.clone());
+                    if err.status == StatusCode::CONFLICT && err.code == 4090 {
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+
+        return Err(AppError::internal("销售单号生成失败，请稍后重试").with_request_id(request_id));
+    }
+
+    {
+        let products = state.products.lock().map_err(|_| {
+            AppError::internal("商品状态锁异常").with_request_id(request_id.clone())
+        })?;
+        for item in &mut items {
+            let product = products.get(&item.product_id).ok_or_else(|| {
+                AppError::not_found("商品不存在").with_request_id(request_id.clone())
+            })?;
+            if product.tenant_id != auth.tenant_id || product.is_deleted {
+                return Err(AppError::not_found("商品不存在").with_request_id(request_id));
+            }
+            item.product_name_snapshot = Some(product.name.clone());
+        }
+    }
+
+    let order = {
+        let now = Utc::now().to_rfc3339();
+        let id = {
+            let mut next_id = state.next_sales_order_id.lock().map_err(|_| {
+                AppError::internal("销售单ID状态锁异常").with_request_id(request_id.clone())
+            })?;
+            *next_id += 1;
+            *next_id
+        };
+
+        let mut orders = state.sales_orders.lock().map_err(|_| {
+            AppError::internal("销售单状态锁异常").with_request_id(request_id.clone())
+        })?;
+        let mut selected_biz_no = None;
+        for _ in 0..8 {
+            let candidate = generate_server_biz_no("SO");
+            let taken = orders
+                .values()
+                .any(|o| o.tenant_id == auth.tenant_id && o.biz_no == candidate);
+            if !taken {
+                selected_biz_no = Some(candidate);
+                break;
+            }
+        }
+
+        let biz_no = selected_biz_no.ok_or_else(|| {
+            AppError::internal("销售单号生成失败，请稍后重试").with_request_id(request_id.clone())
+        })?;
 
         let order = crate::models::SalesOrder {
             id,
@@ -101,7 +204,7 @@ pub async fn create_sales_order(
             customer_id: req.customer_id,
             status: SalesOrderStatus::Draft,
             items,
-            remark: req.remark.clone(),
+            remark: req.remark,
             created_by: auth.user_id,
             version: 1,
             confirmed_at: None,
@@ -111,81 +214,15 @@ pub async fn create_sales_order(
             updated_at: now,
         };
 
-        state
-            .repository
-            .create_sales_order(pool, &order)
-            .await
-            .map_err(|err| err.with_request_id(request_id.clone()))?;
-
-        let body = ApiResponse::success(to_sales_order_data(&order), request_id.clone());
-        let response_body = serde_json::to_value(&body).map_err(|_| {
-            AppError::internal("销售单创建响应序列化失败").with_request_id(request_id.clone())
-        })?;
-        save_idempotency_record(&state, &scope_key, request_payload, response_body).await?;
-
-        return Ok((
-            StatusCode::OK,
-            build_response_headers(&request_id, false),
-            Json(body),
-        )
-            .into_response());
-    }
-
-    {
-        let products = state.products.lock().map_err(|_| {
-            AppError::internal("商品状态锁异常").with_request_id(request_id.clone())
-        })?;
-        for item in &items {
-            let product = products.get(&item.product_id).ok_or_else(|| {
-                AppError::not_found("商品不存在").with_request_id(request_id.clone())
-            })?;
-            if product.tenant_id != auth.tenant_id || product.is_deleted {
-                return Err(AppError::not_found("商品不存在").with_request_id(request_id));
-            }
-        }
-    }
-
-    let now = Utc::now().to_rfc3339();
-    let mut next_id = state.next_sales_order_id.lock().map_err(|_| {
-        AppError::internal("销售单ID状态锁异常").with_request_id(request_id.clone())
-    })?;
-    *next_id += 1;
-    let id = *next_id;
-    drop(next_id);
-
-    let order = crate::models::SalesOrder {
-        id,
-        tenant_id: auth.tenant_id,
-        biz_no,
-        customer_id: req.customer_id,
-        status: SalesOrderStatus::Draft,
-        items,
-        remark: req.remark,
-        created_by: auth.user_id,
-        version: 1,
-        confirmed_at: None,
-        returned_at: None,
-        voided_at: None,
-        created_at: now.clone(),
-        updated_at: now,
+        orders.insert(order.id, order.clone());
+        order
     };
 
-    let mut orders = state
-        .sales_orders
-        .lock()
-        .map_err(|_| AppError::internal("销售单状态锁异常").with_request_id(request_id.clone()))?;
-    if orders
-        .values()
-        .any(|o| o.tenant_id == auth.tenant_id && o.biz_no == order.biz_no)
-    {
-        return Err(AppError::conflict(4090, "销售单号已存在")
-            .with_data(json!({ "biz_no": order.biz_no }))
-            .with_request_id(request_id));
-    }
-    orders.insert(order.id, order.clone());
-    drop(orders);
-
-    let body = ApiResponse::success(to_sales_order_data(&order), request_id.clone());
+    let body = ApiResponse::success(
+        to_sales_order_data_with_product_names(&state, auth.tenant_id, &request_id, &order)
+            .await?,
+        request_id.clone(),
+    );
     let response_body = serde_json::to_value(&body).map_err(|_| {
         AppError::internal("销售单创建响应序列化失败").with_request_id(request_id.clone())
     })?;
@@ -228,7 +265,11 @@ pub async fn get_sales_order(
         order.clone()
     };
 
-    let body = ApiResponse::success(to_sales_order_data(&order), request_id.clone());
+    let body = ApiResponse::success(
+        to_sales_order_data_with_product_names(&state, auth.tenant_id, &request_id, &order)
+            .await?,
+        request_id.clone(),
+    );
     Ok((
         StatusCode::OK,
         build_response_headers(&request_id, false),
@@ -242,7 +283,7 @@ pub async fn confirm_sales_order(
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Path(id): Path<i64>,
-    Json(req): Json<OrderActionRequest>,
+    AppJson(req): AppJson<OrderActionRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "SALES"], &request_id)?;
@@ -292,7 +333,11 @@ pub async fn confirm_sales_order(
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?;
 
-        let body = ApiResponse::success(to_sales_order_data(&updated), request_id.clone());
+        let body = ApiResponse::success(
+            to_sales_order_data_with_product_names(&state, auth.tenant_id, &request_id, &updated)
+                .await?,
+            request_id.clone(),
+        );
         let response_body = serde_json::to_value(&body).map_err(|_| {
             AppError::internal("销售单确认响应序列化失败").with_request_id(request_id.clone())
         })?;
@@ -386,6 +431,8 @@ pub async fn confirm_sales_order(
                 -item.qty,
                 product.current_stock,
                 product.cost_price,
+                Some(item.sell_price),
+                None,
                 auth.user_id,
             ));
         }
@@ -431,7 +478,11 @@ pub async fn confirm_sales_order(
         &request_id,
     )?;
 
-    let body = ApiResponse::success(to_sales_order_data(&updated), request_id.clone());
+    let body = ApiResponse::success(
+        to_sales_order_data_with_product_names(&state, auth.tenant_id, &request_id, &updated)
+            .await?,
+        request_id.clone(),
+    );
     let response_body = serde_json::to_value(&body).map_err(|_| {
         AppError::internal("销售单确认响应序列化失败").with_request_id(request_id.clone())
     })?;
@@ -450,7 +501,7 @@ pub async fn void_sales_order(
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Path(id): Path<i64>,
-    Json(req): Json<OrderActionRequest>,
+    AppJson(req): AppJson<OrderActionRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "SALES"], &request_id)?;
@@ -499,7 +550,11 @@ pub async fn void_sales_order(
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?;
 
-        let body = ApiResponse::success(to_sales_order_data(&updated), request_id.clone());
+        let body = ApiResponse::success(
+            to_sales_order_data_with_product_names(&state, auth.tenant_id, &request_id, &updated)
+                .await?,
+            request_id.clone(),
+        );
         let response_body = serde_json::to_value(&body).map_err(|_| {
             AppError::internal("销售单作废响应序列化失败").with_request_id(request_id.clone())
         })?;
@@ -589,7 +644,11 @@ pub async fn void_sales_order(
         &request_id,
     )?;
 
-    let body = ApiResponse::success(to_sales_order_data(&updated), request_id.clone());
+    let body = ApiResponse::success(
+        to_sales_order_data_with_product_names(&state, auth.tenant_id, &request_id, &updated)
+            .await?,
+        request_id.clone(),
+    );
     let response_body = serde_json::to_value(&body).map_err(|_| {
         AppError::internal("销售单作废响应序列化失败").with_request_id(request_id.clone())
     })?;
@@ -608,7 +667,7 @@ pub async fn return_sales_order(
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Path(id): Path<i64>,
-    Json(req): Json<SalesOrderReturnRequest>,
+    AppJson(req): AppJson<SalesOrderReturnRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "SALES"], &request_id)?;
@@ -667,7 +726,11 @@ pub async fn return_sales_order(
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?;
 
-        let body = ApiResponse::success(to_sales_order_data(&updated), request_id.clone());
+        let body = ApiResponse::success(
+            to_sales_order_data_with_product_names(&state, auth.tenant_id, &request_id, &updated)
+                .await?,
+            request_id.clone(),
+        );
         let response_body = serde_json::to_value(&body).map_err(|_| {
             AppError::internal("销售退货响应序列化失败").with_request_id(request_id.clone())
         })?;
@@ -745,7 +808,7 @@ pub async fn return_sales_order(
                 }))
                 .with_request_id(request_id));
         }
-        pending_returns.push((item.product_id, item.qty));
+        pending_returns.push((item.product_id, item.qty, order_item.sell_price));
     }
 
     {
@@ -757,7 +820,9 @@ pub async fn return_sales_order(
         })?;
         let start_log_id = stock_logs.len() as i64 + 1;
 
-        for (next_log_id, (product_id, qty)) in (start_log_id..).zip(pending_returns.iter()) {
+        for (next_log_id, (product_id, qty, sell_price)) in
+            (start_log_id..).zip(pending_returns.iter())
+        {
             let product = products.get_mut(product_id).ok_or_else(|| {
                 AppError::not_found("商品不存在").with_request_id(request_id.clone())
             })?;
@@ -776,6 +841,8 @@ pub async fn return_sales_order(
                 *qty,
                 product.current_stock,
                 product.cost_price,
+                Some(*sell_price),
+                None,
                 auth.user_id,
             ));
         }
@@ -801,7 +868,7 @@ pub async fn return_sales_order(
                 .with_request_id(request_id));
         }
 
-        for (product_id, qty) in &pending_returns {
+        for (product_id, qty, _) in &pending_returns {
             if let Some(item) = order.items.iter_mut().find(|i| i.product_id == *product_id) {
                 item.returned_qty += *qty;
             }
@@ -835,7 +902,11 @@ pub async fn return_sales_order(
         &request_id,
     )?;
 
-    let body = ApiResponse::success(to_sales_order_data(&updated), request_id.clone());
+    let body = ApiResponse::success(
+        to_sales_order_data_with_product_names(&state, auth.tenant_id, &request_id, &updated)
+            .await?,
+        request_id.clone(),
+    );
     let response_body = serde_json::to_value(&body).map_err(|_| {
         AppError::internal("销售退货响应序列化失败").with_request_id(request_id.clone())
     })?;

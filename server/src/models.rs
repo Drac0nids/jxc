@@ -55,6 +55,35 @@ pub struct Product {
     pub min_stock_limit: i32,
     pub version: i32,
     pub is_deleted: bool,
+    pub category_id: Option<i64>,
+    pub track_batches: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Category {
+    pub id: i64,
+    pub tenant_id: Uuid,
+    pub parent_id: Option<i64>,
+    pub name: String,
+    pub level: i16,
+    pub sort_order: i32,
+    pub is_deleted: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProductBatch {
+    pub id: i64,
+    pub tenant_id: Uuid,
+    pub product_id: i64,
+    pub lot_number: String,
+    pub inbound_at: chrono::NaiveDate,
+    pub produced_at: Option<chrono::NaiveDate>,
+    pub expires_at: Option<chrono::NaiveDate>,
+    pub notes: Option<String>,
+    pub is_sold_out: bool,
+    pub sold_out_at: Option<DateTime<Utc>>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

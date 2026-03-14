@@ -2,7 +2,12 @@ import { computed, ref } from 'vue'
 import { defineStore } from 'pinia'
 
 import type { UserSession } from '@/types/app'
-import { readStoredSession, writeStoredSession } from '@/utils/sessionStorage'
+import {
+  clearStoredScanModes,
+  readStoredSession,
+  resolveScanPreferenceScope,
+  writeStoredSession,
+} from '@/utils/sessionStorage'
 
 export const useAuthStore = defineStore('auth', () => {
   const session = ref<UserSession | null>(readStoredSession())
@@ -19,6 +24,11 @@ export const useAuthStore = defineStore('auth', () => {
   }
 
   function clearSession(): void {
+    const scope = resolveScanPreferenceScope(session.value)
+    if (scope) {
+      clearStoredScanModes(scope)
+    }
+
     session.value = null
     writeStoredSession(null)
   }

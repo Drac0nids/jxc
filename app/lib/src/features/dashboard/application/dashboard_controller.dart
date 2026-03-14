@@ -5,7 +5,8 @@ import '../models/dashboard_data.dart';
 import '../models/dashboard_repository.dart';
 
 class DashboardController extends ChangeNotifier {
-  DashboardController({required DashboardRepository repository}) : _repository = repository;
+  DashboardController({required DashboardRepository repository})
+      : _repository = repository;
 
   final DashboardRepository _repository;
 
@@ -49,7 +50,9 @@ class DashboardController extends ChangeNotifier {
   String _humanizeError(Object error) {
     if (error is ApiException) {
       final String requestIdPart =
-          (error.requestId == null || error.requestId!.isEmpty) ? '' : '，request_id=${error.requestId}';
+          (error.requestId == null || error.requestId!.isEmpty)
+              ? ''
+              : '，request_id=${error.requestId}';
       return '${error.message}（code=${error.code}$requestIdPart）';
     }
     if (error is FormatException) {

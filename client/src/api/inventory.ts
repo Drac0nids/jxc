@@ -3,8 +3,12 @@ import axios, { type AxiosError } from 'axios'
 import { ApiClientError, http, requestApi } from '@/api/http'
 import type {
   ApiResponse,
+  DashboardOrdersDrilldownData,
+  DashboardOrdersDrilldownQuery,
   DashboardData,
   DashboardQuery,
+  InboundBatchRequest,
+  InboundBatchResponseData,
   InboundRequest,
   InboundResponseData,
   ListLowStockAlertsQuery,
@@ -39,6 +43,14 @@ export async function inboundApi(payload: InboundRequest) {
   })
 }
 
+export async function inboundBatchApi(payload: InboundBatchRequest) {
+  return requestApi<InboundBatchResponseData>({
+    method: 'post',
+    url: '/inventory/inbound/batch',
+    data: payload,
+  })
+}
+
 export async function listLowStockAlertsApi(query: ListLowStockAlertsQuery) {
   return requestApi<ListLowStockAlertsResponseData>({
     method: 'get',
@@ -51,6 +63,14 @@ export async function getDashboardApi(query: DashboardQuery) {
   return requestApi<DashboardData>({
     method: 'get',
     url: '/reports/dashboard',
+    params: query,
+  })
+}
+
+export async function getDashboardOrdersDrilldownApi(query: DashboardOrdersDrilldownQuery) {
+  return requestApi<DashboardOrdersDrilldownData>({
+    method: 'get',
+    url: '/reports/dashboard/orders',
     params: query,
   })
 }

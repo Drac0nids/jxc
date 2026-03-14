@@ -26,6 +26,7 @@ interface StockCheckCreateItemForm {
 interface StockCheckConfirmItemForm {
   local_id: number
   product_id: number
+  product_name: string
   book_stock: number
   actual_stock: string
 }
@@ -47,14 +48,6 @@ const checkResult = ref<StockCheckData | null>(null)
 let createItemSeed = 1
 let confirmItemSeed = 1
 
-function generateBizNo(): string {
-  const now = new Date()
-  const pad = (value: number): string => value.toString().padStart(2, '0')
-  const timePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  const randomPart = Math.random().toString(36).slice(2, 6).toUpperCase()
-  return `SC-${timePart}-${randomPart}`
-}
-
 function createCreateItemForm(): StockCheckCreateItemForm {
   return {
     local_id: createItemSeed++,
@@ -63,7 +56,6 @@ function createCreateItemForm(): StockCheckCreateItemForm {
 }
 
 const createForm = reactive({
-  biz_no: generateBizNo(),
   remark: '',
   items: [createCreateItemForm()] as StockCheckCreateItemForm[],
 })
@@ -127,7 +119,6 @@ function removeCreateItem(localId: number): void {
 }
 
 function resetCreateForm(): void {
-  createForm.biz_no = generateBizNo()
   createForm.remark = ''
   createForm.items = [createCreateItemForm()]
   resetScanForm()
@@ -164,6 +155,7 @@ function syncCheckContext(check: StockCheckData): void {
   confirmForm.items = check.items.map((item) => ({
     local_id: confirmItemSeed++,
     product_id: item.product_id,
+    product_name: item.product_name || `商品#${item.product_id}`,
     book_stock: item.book_stock,
     actual_stock: String(item.actual_stock ?? item.book_stock),
   }))
@@ -172,10 +164,6 @@ function syncCheckContext(check: StockCheckData): void {
 function validateCreateForm(): string | null {
   if (!canOperate.value) {
     return '当前角色无库存盘点操作权限，仅 OWNER/PURCHASER 可操作'
-  }
-
-  if (!createForm.biz_no.trim()) {
-    return '请输入盘点单业务单号'
   }
 
   if (createForm.items.length === 0) {
@@ -293,7 +281,6 @@ function buildCreatePayload(): StockCheckCreateRequest {
   }))
 
   const payload: StockCheckCreateRequest = {
-    biz_no: createForm.biz_no.trim(),
     items,
   }
 
@@ -505,7 +492,7 @@ async function confirmStockCheck(): Promise<void> {
         </label>
 
         <button class="btn" type="submit" :disabled="busy || !canOperate">
-          {{ scanLoading ? '识别中...' : '扫码并加入明细' }}
+          {{ scanLoading ? '识别中...' : '按条码加入明细' }}
         </button>
         <button class="btn btn-secondary" type="button" :disabled="busy" @click="resetScanForm">
           清空
@@ -521,11 +508,6 @@ async function confirmStockCheck(): Promise<void> {
       <h3>1）创建盘点单</h3>
 
       <div class="form-inline form-inline-compact">
-        <label class="form-label inline">
-          <span>业务单号 *</span>
-          <input v-model="createForm.biz_no" :disabled="busy" placeholder="例如：SC-20260306-0001" />
-        </label>
-
         <label class="form-label inline">
           <span>备注</span>
           <input v-model="createForm.remark" :disabled="busy" placeholder="可选备注" />
@@ -631,16 +613,18 @@ async function confirmStockCheck(): Promise<void> {
           <thead>
             <tr>
               <th>商品ID</th>
+              <th>商品名称</th>
               <th>账面库存</th>
               <th>实盘库存 *</th>
             </tr>
           </thead>
           <tbody>
             <tr v-if="confirmForm.items.length === 0">
-              <td class="empty-cell" colspan="3">请先查询盘点单以加载确认明细</td>
+              <td class="empty-cell" colspan="4">请先查询盘点单以加载确认明细</td>
             </tr>
             <tr v-for="item in confirmForm.items" v-else :key="item.local_id">
               <td>{{ item.product_id }}</td>
+              <td>{{ item.product_name }}</td>
               <td>{{ item.book_stock }}</td>
               <td>
                 <input v-model="item.actual_stock" class="table-input" :disabled="busy" placeholder="请输入实盘库存" />
@@ -677,6 +661,7 @@ async function confirmStockCheck(): Promise<void> {
           <thead>
             <tr>
               <th>商品ID</th>
+              <th>商品名称</th>
               <th>账面库存</th>
               <th>实盘库存</th>
               <th>差异数量</th>
@@ -685,6 +670,7 @@ async function confirmStockCheck(): Promise<void> {
           <tbody>
             <tr v-for="item in checkResult.items" :key="item.product_id">
               <td>{{ item.product_id }}</td>
+              <td>{{ item.product_name || '-' }}</td>
               <td>{{ item.book_stock }}</td>
               <td>{{ item.actual_stock ?? '-' }}</td>
               <td>{{ item.delta_qty ?? '-' }}</td>

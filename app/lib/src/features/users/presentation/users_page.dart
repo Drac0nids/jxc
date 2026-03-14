@@ -110,21 +110,16 @@ class _UsersPageState extends State<UsersPage> {
             title: const Text('人员管理'),
             actions: <Widget>[
               IconButton(
-                tooltip: '刷新',
-                icon: const Icon(Icons.refresh),
-                onPressed: ctrl.loading ? null : ctrl.load,
+                tooltip: '添加员工',
+                onPressed: ctrl.submitting ? null : _showCreateDialog,
+                icon: const Icon(Icons.person_add_rounded),
               ),
             ],
-          ),
-          floatingActionButton: FloatingActionButton.extended(
-            onPressed: ctrl.submitting ? null : _showCreateDialog,
-            icon: const Icon(Icons.person_add_rounded),
-            label: const Text('添加员工'),
           ),
           body: RefreshIndicator(
             onRefresh: ctrl.load,
             child: ListView(
-              padding: const EdgeInsets.fromLTRB(16, 16, 16, 96),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
               children: <Widget>[
                 const BrandHeroBanner(
                   title: '人员与权限管理',

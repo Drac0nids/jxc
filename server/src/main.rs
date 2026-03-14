@@ -1,6 +1,7 @@
 mod app;
 mod config;
 mod error;
+mod extractors;
 mod middleware;
 mod models;
 mod persistence;

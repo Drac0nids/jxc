@@ -111,7 +111,7 @@ export interface ProductData {
   unit: string
   current_stock: number
   retail_price: string
-  wholesale_price: string
+  last_inbound_unit_cost: string | null
   cost_price: string | null
   min_stock_limit: number
   version: number
@@ -125,9 +125,18 @@ export interface ScanProductData {
   unit: string
   current_stock: number
   retail_price: string
+  last_inbound_unit_cost: string | null
   cost_price: string | null
   version: number
   min_stock_limit: number
+}
+
+export interface BarcodeLookupData {
+  barcode: string
+  status: 'FOUND' | 'NOT_FOUND' | string
+  suggested_name: string | null
+  cache_hit: boolean
+  source: 'CACHE' | 'THIRD_PARTY' | 'CACHE_STALE' | 'DEGRADED' | string
 }
 
 export interface PagedData<T> {
@@ -150,10 +159,9 @@ export interface CreateProductRequest {
   name: string
   unit: string
   retail_price: string
-  wholesale_price: string
   init_stock?: number
   min_stock_limit?: number
-  cost_price?: string
+  cost_price: string
 }
 
 export interface UpdateProductRequest {
@@ -162,7 +170,6 @@ export interface UpdateProductRequest {
   name?: string
   unit?: string
   retail_price?: string
-  wholesale_price?: string
   min_stock_limit?: number
   expected_version?: number
 }
@@ -204,11 +211,19 @@ export interface DashboardQuery {
 }
 
 export interface DashboardData {
+  date: string
   total_sales: string
   total_gross_profit: string
   total_orders: number
   low_stock_count: number
   top_selling_item: string
+}
+
+export interface DashboardOrdersDrilldownQuery {
+  start_date?: string
+  end_date?: string
+  page?: number
+  page_size?: number
 }
 
 export type SalesReportGroupBy = 'product'
@@ -270,10 +285,22 @@ export interface InboundRequest {
   product_id?: number
   barcode?: string
   qty: number
-  unit_cost: string
+  unit_cost?: string
   expected_version?: number
-  biz_no: string
   remark?: string
+}
+
+export interface InboundBatchItemRequest {
+  product_id?: number
+  barcode?: string
+  qty: number
+  unit_cost?: string
+  expected_version?: number
+  remark?: string
+}
+
+export interface InboundBatchRequest {
+  items: InboundBatchItemRequest[]
 }
 
 export interface InboundResponseData {
@@ -284,6 +311,18 @@ export interface InboundResponseData {
   version: number
 }
 
+export interface InboundBatchItemResponseData {
+  product_id: number
+  current_stock: number
+  cost_price: string
+  version: number
+}
+
+export interface InboundBatchResponseData {
+  biz_no: string
+  items: InboundBatchItemResponseData[]
+}
+
 export interface PurchaseOrderCreateItemRequest {
   product_id: number
   qty: number
@@ -291,7 +330,6 @@ export interface PurchaseOrderCreateItemRequest {
 }
 
 export interface PurchaseOrderCreateRequest {
-  biz_no: string
   supplier_id?: number
   items: PurchaseOrderCreateItemRequest[]
   remark?: string
@@ -306,7 +344,6 @@ export interface StockCheckCreateItemRequest {
 }
 
 export interface StockCheckCreateRequest {
-  biz_no: string
   items: StockCheckCreateItemRequest[]
   remark?: string
 }
@@ -324,6 +361,7 @@ export interface StockCheckConfirmRequest {
 
 export interface StockCheckItemData {
   product_id: number
+  product_name: string
   book_stock: number
   actual_stock: number | null
   delta_qty: number | null
@@ -344,8 +382,10 @@ export interface StockCheckData {
 
 export interface PurchaseOrderItemData {
   product_id: number
+  product_name: string
   qty: number
   unit_cost: string
+  line_amount: string
 }
 
 export interface PurchaseOrderData {
@@ -354,6 +394,7 @@ export interface PurchaseOrderData {
   supplier_id: number | null
   status: 'DRAFT' | 'CONFIRMED' | 'VOIDED' | string
   items: PurchaseOrderItemData[]
+  total_amount: string
   remark: string | null
   version: number
   confirmed_at: string | null
@@ -369,7 +410,6 @@ export interface SalesOrderCreateItemRequest {
 }
 
 export interface SalesOrderCreateRequest {
-  biz_no: string
   customer_id?: number
   items: SalesOrderCreateItemRequest[]
   remark?: string
@@ -388,8 +428,10 @@ export interface SalesOrderReturnRequest {
 
 export interface SalesOrderItemData {
   product_id: number
+  product_name: string
   qty: number
   sell_price: string
+  line_amount: string
   returned_qty: number
 }
 
@@ -415,8 +457,12 @@ export interface SalesOrderData {
   updated_at: string
 }
 
+export interface DashboardOrdersDrilldownData extends PagedData<SalesOrderData> {
+  start_date: string
+  end_date: string
+}
+
 export interface OutboundRequest {
-  biz_no: string
   customer_id?: number
   expected_version?: number
   items: OutboundItemRequest[]

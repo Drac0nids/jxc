@@ -91,6 +91,7 @@ pub struct ListProductsQuery {
     pub keyword: Option<String>,
     pub barcode: Option<String>,
     pub low_stock: Option<String>,
+    pub category_id: Option<i64>,
 }
 
 #[derive(Debug, Serialize)]
@@ -106,6 +107,8 @@ pub struct ProductData {
     pub cost_price: Option<String>,
     pub min_stock_limit: i32,
     pub version: i32,
+    pub category_id: Option<i64>,
+    pub track_batches: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -118,6 +121,8 @@ pub struct CreateProductRequest {
     pub init_stock: Option<i32>,
     pub min_stock_limit: Option<i32>,
     pub cost_price: String,
+    pub category_id: Option<i64>,
+    pub track_batches: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -129,6 +134,8 @@ pub struct UpdateProductRequest {
     pub retail_price: Option<String>,
     pub min_stock_limit: Option<i32>,
     pub expected_version: Option<i32>,
+    pub category_id: Option<i64>,
+    pub track_batches: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -191,6 +198,7 @@ pub struct InventoryResultData {
     pub current_stock: i32,
     pub cost_price: String,
     pub version: i32,
+    pub track_batches: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -199,6 +207,7 @@ pub struct InventoryBatchItemResultData {
     pub current_stock: i32,
     pub cost_price: String,
     pub version: i32,
+    pub track_batches: bool,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -777,6 +786,8 @@ pub fn to_product_data(product: &Product, hide_cost_price: bool) -> ProductData 
         },
         min_stock_limit: product.min_stock_limit,
         version: product.version,
+        category_id: product.category_id,
+        track_batches: product.track_batches,
     }
 }
 

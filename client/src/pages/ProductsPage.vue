@@ -1,7 +1,9 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 
 import {
+  barcodeLookupProductNameApi,
   createProductApi,
   deleteProductApi,
   listProductsApi,
@@ -13,6 +15,8 @@ import { useAuthStore } from '@/stores/auth'
 import type { CreateProductRequest, ProductData, UpdateProductRequest } from '@/types/api'
 
 const authStore = useAuthStore()
+const router = useRouter()
+const route = useRoute()
 
 const MONEY_PATTERN = /^\d+(\.\d{1,4})?$/
 
@@ -78,7 +82,6 @@ const createForm = reactive({
   name: '',
   unit: '',
   retail_price: '',
-  wholesale_price: '',
   init_stock: '0',
   min_stock_limit: '0',
   cost_price: '',
@@ -90,7 +93,6 @@ const editForm = reactive({
   name: '',
   unit: '',
   retail_price: '',
-  wholesale_price: '',
   min_stock_limit: '0',
   expected_version: '',
 })
@@ -98,6 +100,20 @@ const editingProductId = ref<number | null>(null)
 
 const products = ref<ProductData[]>([])
 const total = ref(0)
+
+function firstQueryValue(value: unknown): string {
+  if (typeof value === 'string') {
+    return value
+  }
+
+  if (Array.isArray(value) && typeof value[0] === 'string') {
+    return value[0]
+  }
+
+  return ''
+}
+
+const fromInbound = computed(() => firstQueryValue(route.query.from).trim() === 'inbound')
 
 function formatApiError(error: unknown, fallback: string): string {
   if (error instanceof ApiClientError) {
@@ -208,7 +224,21 @@ async function scanBarcode(): Promise<void> {
     if (error instanceof ApiClientError && error.code === 4040) {
       createForm.barcode = barcode
       if (canCreate.value) {
-        scanSuccessText.value = '未找到商品，已将条码回填到创建表单，请补全信息后创建。'
+        createForm.name = ''
+
+        try {
+          const lookupResponse = await barcodeLookupProductNameApi(barcode)
+          const suggestedName = lookupResponse.data.suggested_name?.trim() ?? ''
+
+          if (suggestedName) {
+            createForm.name = suggestedName
+            scanSuccessText.value = `未找到商品，已回填条码并自动带出名称（来源：${lookupResponse.data.source}），请补全其余信息后创建。`
+          } else {
+            scanSuccessText.value = '未找到商品，已将条码回填到创建表单，暂未获取到建议名称，请补全信息后创建。'
+          }
+        } catch {
+          scanSuccessText.value = '未找到商品，已将条码回填到创建表单，请补全信息后创建。'
+        }
       } else {
         scanErrorText.value = '未找到商品，且当前角色无建档权限（仅 OWNER/PURCHASER）。'
       }
@@ -250,7 +280,6 @@ function resetCreateFormInternal(shouldClearMessage: boolean): void {
   createForm.name = ''
   createForm.unit = ''
   createForm.retail_price = ''
-  createForm.wholesale_price = ''
   createForm.init_stock = '0'
   createForm.min_stock_limit = '0'
   createForm.cost_price = ''
@@ -290,10 +319,6 @@ function validateCreateForm(): string | null {
     return '零售价格式错误（示例：3.50）'
   }
 
-  if (!MONEY_PATTERN.test(createForm.wholesale_price.trim())) {
-    return '批发价格式错误（示例：3.20）'
-  }
-
   const initStockRaw = createForm.init_stock.trim()
   if (initStockRaw) {
     const initStock = Number(initStockRaw)
@@ -311,8 +336,11 @@ function validateCreateForm(): string | null {
   }
 
   const costPriceRaw = createForm.cost_price.trim()
-  if (costPriceRaw && !MONEY_PATTERN.test(costPriceRaw)) {
-    return '成本价格式错误（示例：2.10）'
+  if (!costPriceRaw) {
+    return '进货价格不能为空'
+  }
+  if (!MONEY_PATTERN.test(costPriceRaw)) {
+    return '进货价格式错误（示例：2.10）'
   }
 
   return null
@@ -324,7 +352,7 @@ function buildCreatePayload(): CreateProductRequest {
     name: createForm.name.trim(),
     unit: createForm.unit.trim(),
     retail_price: createForm.retail_price.trim(),
-    wholesale_price: createForm.wholesale_price.trim(),
+    cost_price: createForm.cost_price.trim(),
   }
 
   const sku = createForm.sku.trim()
@@ -342,11 +370,6 @@ function buildCreatePayload(): CreateProductRequest {
     payload.min_stock_limit = Number(minStockLimitRaw)
   }
 
-  const costPriceRaw = createForm.cost_price.trim()
-  if (costPriceRaw) {
-    payload.cost_price = costPriceRaw
-  }
-
   return payload
 }
 
@@ -356,7 +379,6 @@ function fillEditFormByProduct(product: ProductData): void {
   editForm.name = product.name
   editForm.unit = product.unit
   editForm.retail_price = product.retail_price
-  editForm.wholesale_price = product.wholesale_price
   editForm.min_stock_limit = String(product.min_stock_limit)
   editForm.expected_version = String(product.version)
 }
@@ -367,7 +389,6 @@ function resetEditFormInternal(shouldClearMessage: boolean): void {
   editForm.name = ''
   editForm.unit = ''
   editForm.retail_price = ''
-  editForm.wholesale_price = ''
   editForm.min_stock_limit = '0'
   editForm.expected_version = ''
 
@@ -440,10 +461,6 @@ function validateEditForm(): string | null {
     return '零售价格式错误（示例：3.50）'
   }
 
-  if (!MONEY_PATTERN.test(editForm.wholesale_price.trim())) {
-    return '批发价格式错误（示例：3.20）'
-  }
-
   const minStockLimitRaw = editForm.min_stock_limit.trim()
   if (!minStockLimitRaw) {
     return '预警阈值不能为空'
@@ -472,7 +489,6 @@ function buildUpdatePayload(): UpdateProductRequest {
     name: editForm.name.trim(),
     unit: editForm.unit.trim(),
     retail_price: editForm.retail_price.trim(),
-    wholesale_price: editForm.wholesale_price.trim(),
     min_stock_limit: Number(editForm.min_stock_limit.trim()),
     expected_version: Number(editForm.expected_version.trim()),
   }
@@ -497,6 +513,18 @@ async function submitCreateProduct(): Promise<void> {
     const response = await createProductApi(buildCreatePayload())
     resetCreateFormInternal(false)
     createSuccessText.value = `创建成功：#${response.data.id} ${response.data.name}`
+
+    if (fromInbound.value) {
+      await router.push({
+        name: 'inbound',
+        query: {
+          created_product_id: String(response.data.id),
+          created_barcode: response.data.barcode,
+        },
+      })
+      return
+    }
+
     query.page = 1
     await fetchProducts()
   } catch (error) {
@@ -603,6 +631,14 @@ async function submitDeleteProduct(item: ProductData): Promise<void> {
 }
 
 onMounted(() => {
+  if (fromInbound.value) {
+    const barcodeFromInbound = firstQueryValue(route.query.barcode).trim()
+    if (barcodeFromInbound) {
+      createForm.barcode = barcodeFromInbound
+      scanSuccessText.value = `来自入库页的未命中条码已回填：${barcodeFromInbound}，请补全商品信息后创建。`
+    }
+  }
+
   void fetchProducts()
 })
 </script>
@@ -614,7 +650,7 @@ onMounted(() => {
     <p v-if="!canCreate" class="warn-text">当前角色无商品写操作权限，仅 OWNER/PURCHASER 可操作。</p>
 
     <div class="card-panel form-grid" style="margin-bottom: 12px">
-      <h3>扫码查询 / 快速建档</h3>
+      <h3>条码查询 / 快速建档</h3>
 
       <form class="form-inline" @submit.prevent="scanBarcode">
         <label class="form-label inline">
@@ -627,9 +663,15 @@ onMounted(() => {
         </label>
 
         <button class="btn" type="submit" :disabled="scanLoading">
-          {{ scanLoading ? '查询中...' : '扫码查询' }}
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7" /><path d="m20 20-3.2-3.2" /></svg>
+          </span>
+          {{ scanLoading ? '查询中...' : '按条码查询' }}
         </button>
         <button class="btn btn-secondary" type="button" :disabled="scanLoading" @click="resetScanForm">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 4h16M7 4v16m10-16v16M4 20h16" /></svg>
+          </span>
           清空
         </button>
       </form>
@@ -674,8 +716,8 @@ onMounted(() => {
         </label>
 
         <label class="form-label inline">
-          <span>批发价 *</span>
-          <input v-model="createForm.wholesale_price" :disabled="createBusy" placeholder="例如：3.20" />
+          <span>进货价格 *</span>
+          <input v-model="createForm.cost_price" :disabled="createBusy" placeholder="例如：2.10" />
         </label>
       </div>
 
@@ -690,17 +732,19 @@ onMounted(() => {
           <input v-model="createForm.min_stock_limit" :disabled="createBusy" placeholder="默认 0" />
         </label>
 
-        <label class="form-label inline">
-          <span>成本价</span>
-          <input v-model="createForm.cost_price" :disabled="createBusy" placeholder="可选，例如：2.10" />
-        </label>
       </div>
 
       <div class="form-actions">
-        <button class="btn" type="button" :disabled="createBusy || !canCreate" @click="submitCreateProduct">
+        <button class="btn btn-success" type="button" :disabled="createBusy || !canCreate" @click="submitCreateProduct">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14" /></svg>
+          </span>
           {{ createLoading ? '创建中...' : '创建商品' }}
         </button>
         <button class="btn btn-secondary" type="button" :disabled="createBusy" @click="resetCreateForm">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 12a8 8 0 1 0 2-5.3" /><path d="M4 4v4h4" /></svg>
+          </span>
           重置创建表单
         </button>
       </div>
@@ -743,10 +787,6 @@ onMounted(() => {
             <input v-model="editForm.retail_price" :disabled="editBusy" />
           </label>
 
-          <label class="form-label inline">
-            <span>批发价 *</span>
-            <input v-model="editForm.wholesale_price" :disabled="editBusy" />
-          </label>
         </div>
 
         <div class="form-inline form-inline-compact">
@@ -762,7 +802,10 @@ onMounted(() => {
         </div>
 
         <div class="form-actions">
-          <button class="btn" type="button" :disabled="editBusy || !canCreate" @click="submitUpdateProduct">
+          <button class="btn btn-warning" type="button" :disabled="editBusy || !canCreate" @click="submitUpdateProduct">
+            <span class="btn-icon" aria-hidden="true">
+              <svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z" /><path d="m12 6 4 4" /></svg>
+            </span>
             {{ editLoading ? '保存中...' : '保存修改' }}
           </button>
           <button class="btn btn-secondary" type="button" :disabled="editBusy" @click="resetEditFormToLatest">
@@ -794,6 +837,9 @@ onMounted(() => {
 
         <button class="btn" type="submit" :disabled="listLoading">查询</button>
         <button class="btn btn-secondary" type="button" :disabled="listLoading" @click="resetFilters">
+          <span class="btn-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M4 6h16M7 12h10M10 18h4" /></svg>
+          </span>
           重置
         </button>
       </form>
@@ -814,8 +860,7 @@ onMounted(() => {
               <th>名称</th>
               <th>库存</th>
               <th>零售价</th>
-              <th>批发价</th>
-              <th v-if="canViewCostPrice">成本价</th>
+              <th v-if="canViewCostPrice">进货价格</th>
               <th>预警阈值</th>
               <th>版本</th>
               <th>操作</th>
@@ -829,7 +874,6 @@ onMounted(() => {
               <td>{{ item.name }}</td>
               <td>{{ item.current_stock }}</td>
               <td>{{ item.retail_price }}</td>
-              <td>{{ item.wholesale_price }}</td>
               <td v-if="canViewCostPrice">{{ item.cost_price ?? '-' }}</td>
               <td>{{ item.min_stock_limit }}</td>
               <td>{{ item.version }}</td>
@@ -841,6 +885,9 @@ onMounted(() => {
                     :disabled="rowActionBusy"
                     @click="startEditProduct(item)"
                   >
+                    <span class="btn-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z" /><path d="m12 6 4 4" /></svg>
+                    </span>
                     {{ editingProductId === item.id ? '编辑中' : '编辑' }}
                   </button>
                   <button
@@ -849,6 +896,9 @@ onMounted(() => {
                     :disabled="rowActionBusy"
                     @click="submitDeleteProduct(item)"
                   >
+                    <span class="btn-icon" aria-hidden="true">
+                      <svg viewBox="0 0 24 24"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M8 7v12m8-12v12M6 7l1 12h10l1-12" /></svg>
+                    </span>
                     {{ deleteLoadingId === item.id ? '删除中...' : '删除' }}
                   </button>
                 </div>
@@ -856,7 +906,7 @@ onMounted(() => {
               </td>
             </tr>
             <tr v-if="!listLoading && products.length === 0">
-              <td :colspan="canViewCostPrice ? 11 : 10" class="empty-cell">暂无数据</td>
+              <td :colspan="canViewCostPrice ? 10 : 9" class="empty-cell">暂无数据</td>
             </tr>
           </tbody>
         </table>

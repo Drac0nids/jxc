@@ -8,7 +8,7 @@ info:
     - 鉴权：`Authorization: Bearer <access_token>`
     - 写接口幂等：`X-Idempotency-Key`
     - 金额字段：字符串传输
-  version: 1.1.0
+  version: 1.1.3
 servers:
   - url: http://127.0.0.1:8080
     description: Local Development
@@ -431,7 +431,7 @@ paths:
               $ref: '#/components/schemas/PurchaseOrderCreateRequest'
       responses:
         '200':
-          $ref: '#/components/responses/SuccessJson'
+          $ref: '#/components/responses/SuccessPurchaseOrderJson'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -452,7 +452,7 @@ paths:
         - $ref: '#/components/parameters/PathId'
       responses:
         '200':
-          $ref: '#/components/responses/SuccessJson'
+          $ref: '#/components/responses/SuccessPurchaseOrderJson'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -476,7 +476,7 @@ paths:
               $ref: '#/components/schemas/OrderActionRequest'
       responses:
         '200':
-          $ref: '#/components/responses/SuccessJson'
+          $ref: '#/components/responses/SuccessPurchaseOrderJson'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -506,7 +506,7 @@ paths:
               $ref: '#/components/schemas/OrderActionRequest'
       responses:
         '200':
-          $ref: '#/components/responses/SuccessJson'
+          $ref: '#/components/responses/SuccessPurchaseOrderJson'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -535,7 +535,7 @@ paths:
               $ref: '#/components/schemas/SalesOrderCreateRequest'
       responses:
         '200':
-          $ref: '#/components/responses/SuccessJson'
+          $ref: '#/components/responses/SuccessSalesOrderJson'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -556,7 +556,7 @@ paths:
         - $ref: '#/components/parameters/PathId'
       responses:
         '200':
-          $ref: '#/components/responses/SuccessJson'
+          $ref: '#/components/responses/SuccessSalesOrderJson'
         '401':
           $ref: '#/components/responses/Unauthorized'
         '404':
@@ -580,7 +580,7 @@ paths:
               $ref: '#/components/schemas/OrderActionRequest'
       responses:
         '200':
-          $ref: '#/components/responses/SuccessJson'
+          $ref: '#/components/responses/SuccessSalesOrderJson'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -610,7 +610,7 @@ paths:
               $ref: '#/components/schemas/OrderActionRequest'
       responses:
         '200':
-          $ref: '#/components/responses/SuccessJson'
+          $ref: '#/components/responses/SuccessSalesOrderJson'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -640,7 +640,7 @@ paths:
               $ref: '#/components/schemas/SalesOrderReturnRequest'
       responses:
         '200':
-          $ref: '#/components/responses/SuccessJson'
+          $ref: '#/components/responses/SuccessSalesOrderJson'
         '400':
           $ref: '#/components/responses/BadRequest'
         '401':
@@ -785,6 +785,41 @@ paths:
         '409':
           $ref: '#/components/responses/Conflict'
 
+  /api/v1/inventory/inbound/batch:
+    post:
+      tags: [Inventory]
+      summary: 批量采购入库
+      description: |
+        批量入库按**单事务**执行，任一明细失败则整批回滚。
+        
+        - Header 必须携带 `X-Idempotency-Key`
+        - 批次内统一生成并返回 `biz_no`
+        - `items[*].unit_cost` 可选；不传或空字符串时回落商品当前 `cost_price`
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - $ref: '#/components/parameters/XIdempotencyKey'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/InboundBatchRequest'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+
   /api/v1/inventory/outbound:
     post:
       tags: [Inventory]
@@ -863,6 +898,47 @@ paths:
           $ref: '#/components/responses/BadRequest'
         '401':
           $ref: '#/components/responses/Unauthorized'
+
+  /api/v1/reports/dashboard/orders:
+    get:
+      tags: [Reports]
+      summary: 看板订单数下钻列表
+      description: |
+        与 `GET /api/v1/reports/dashboard` 的 `total_orders` 口径一致。
+
+        - 仅统计有效 `OUT_SALE` 流水（有效销售单价：快照优先，映射兜底）
+        - 按唯一 `biz_no` 聚合
+        - 若 `biz_no` 无 sales_orders 主记录，返回 `status=OUTBOUND_ONLY` 的聚合行
+        - 聚合行优先回填按 `(biz_no, product_id, sell_price)` 聚合得到的 `items`；仅历史数据无法聚合时允许 `items=[]`
+      security:
+        - bearerAuth: []
+      parameters:
+        - $ref: '#/components/parameters/XRequestId'
+        - name: start_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+            example: '2026-03-02'
+        - name: end_date
+          in: query
+          required: false
+          schema:
+            type: string
+            format: date
+            example: '2026-03-02'
+        - $ref: '#/components/parameters/Page'
+        - $ref: '#/components/parameters/PageSize'
+      responses:
+        '200':
+          $ref: '#/components/responses/SuccessDashboardOrdersDrilldownJson'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
 
   /api/v1/reports/sales:
     get:
@@ -1096,6 +1172,40 @@ components:
           schema:
             $ref: '#/components/schemas/ApiSuccess'
 
+    SuccessPurchaseOrderJson:
+      description: 采购单业务成功（小票字段增强）
+      headers:
+        x-request-id:
+          $ref: '#/components/headers/XRequestIdHeader'
+        x-idempotent-replay:
+          $ref: '#/components/headers/XIdempotentReplayHeader'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiSuccessPurchaseOrder'
+
+    SuccessSalesOrderJson:
+      description: 销售单业务成功（小票字段增强）
+      headers:
+        x-request-id:
+          $ref: '#/components/headers/XRequestIdHeader'
+        x-idempotent-replay:
+          $ref: '#/components/headers/XIdempotentReplayHeader'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiSuccessSalesOrder'
+
+    SuccessDashboardOrdersDrilldownJson:
+      description: 看板订单下钻成功（含销售单小票字段）
+      headers:
+        x-request-id:
+          $ref: '#/components/headers/XRequestIdHeader'
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/ApiSuccessDashboardOrdersDrilldown'
+
     ExportFileSuccess:
       description: 导出成功，返回文件流
       headers:
@@ -1175,6 +1285,217 @@ components:
         request_id:
           type: string
           example: req_20260303_xxx
+
+    ApiSuccessPurchaseOrder:
+      type: object
+      required: [code, message, data, request_id]
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          $ref: '#/components/schemas/PurchaseOrderData'
+        request_id:
+          type: string
+          example: req_20260303_xxx
+
+    ApiSuccessSalesOrder:
+      type: object
+      required: [code, message, data, request_id]
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          $ref: '#/components/schemas/SalesOrderData'
+        request_id:
+          type: string
+          example: req_20260303_xxx
+
+    ApiSuccessDashboardOrdersDrilldown:
+      type: object
+      required: [code, message, data, request_id]
+      properties:
+        code:
+          type: integer
+          example: 200
+        message:
+          type: string
+          example: success
+        data:
+          $ref: '#/components/schemas/DashboardOrdersDrilldownData'
+        request_id:
+          type: string
+          example: req_20260303_xxx
+
+    PurchaseOrderItemData:
+      type: object
+      required: [product_id, product_name, qty, unit_cost, line_amount]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        product_name:
+          type: string
+          description: 商品名称（优先使用下单时快照，其次商品主数据映射，最终兜底为 商品#<product_id>）
+        qty:
+          type: integer
+        unit_cost:
+          type: string
+          description: 单次进价（金额字符串，4位小数）
+        line_amount:
+          type: string
+          description: 行小计（qty * unit_cost，金额字符串，4位小数）
+
+    PurchaseOrderData:
+      type: object
+      required:
+        [
+          id,
+          biz_no,
+          status,
+          items,
+          total_amount,
+          version,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id:
+          type: integer
+          format: int64
+        biz_no:
+          type: string
+        supplier_id:
+          type: integer
+          format: int64
+          nullable: true
+        status:
+          type: string
+          enum: [DRAFT, CONFIRMED, VOIDED]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/PurchaseOrderItemData'
+        total_amount:
+          type: string
+          description: 订单总金额（所有行小计求和，金额字符串，4位小数）
+        remark:
+          type: string
+          nullable: true
+        version:
+          type: integer
+        confirmed_at:
+          type: string
+          nullable: true
+        voided_at:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+        updated_at:
+          type: string
+
+    SalesOrderItemData:
+      type: object
+      required: [product_id, product_name, qty, sell_price, line_amount, returned_qty]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        product_name:
+          type: string
+          description: 商品名称（优先使用下单时快照，其次商品主数据映射，最终兜底为 商品#<product_id>）
+        qty:
+          type: integer
+        sell_price:
+          type: string
+          description: 销售单价（金额字符串，4位小数）
+        line_amount:
+          type: string
+          description: 行小计（qty * sell_price，金额字符串，4位小数）
+        returned_qty:
+          type: integer
+
+    SalesOrderData:
+      type: object
+      required:
+        [
+          id,
+          biz_no,
+          status,
+          items,
+          total_amount,
+          version,
+          created_at,
+          updated_at,
+        ]
+      properties:
+        id:
+          type: integer
+          format: int64
+        biz_no:
+          type: string
+        customer_id:
+          type: integer
+          format: int64
+          nullable: true
+        status:
+          type: string
+          enum: [DRAFT, CONFIRMED, RETURNED_PARTIAL, RETURNED_FULL, VOIDED, OUTBOUND_ONLY]
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesOrderItemData'
+        total_amount:
+          type: string
+          description: 订单总金额（金额字符串，4位小数）
+        remark:
+          type: string
+          nullable: true
+        version:
+          type: integer
+        confirmed_at:
+          type: string
+          nullable: true
+        returned_at:
+          type: string
+          nullable: true
+        voided_at:
+          type: string
+          nullable: true
+        created_at:
+          type: string
+        updated_at:
+          type: string
+
+    DashboardOrdersDrilldownData:
+      type: object
+      required: [start_date, end_date, list, total, page, page_size]
+      properties:
+        start_date:
+          type: string
+          format: date
+        end_date:
+          type: string
+          format: date
+        list:
+          type: array
+          items:
+            $ref: '#/components/schemas/SalesOrderData'
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+        page_size:
+          type: integer
 
     ApiError:
       type: object
@@ -1256,7 +1577,7 @@ components:
 
     ProductCreateRequest:
       type: object
-      required: [barcode, name, unit, retail_price, wholesale_price]
+      required: [barcode, name, unit, retail_price, wholesale_price, cost_price]
       properties:
         sku:
           type: string
@@ -1278,6 +1599,7 @@ components:
           minimum: 0
         cost_price:
           type: string
+          description: 商品初始成本价（必填，金额字符串）
 
     ProductUpdateRequest:
       type: object
@@ -1315,10 +1637,12 @@ components:
 
     PurchaseOrderCreateRequest:
       type: object
-      required: [biz_no, items]
+      required: [items]
       properties:
         biz_no:
           type: string
+          nullable: true
+          description: 兼容字段，可传可不传；创建时由服务端自动生成并以响应 data.biz_no 为准
         supplier_id:
           type: integer
           format: int64
@@ -1351,10 +1675,12 @@ components:
 
     SalesOrderCreateRequest:
       type: object
-      required: [biz_no, items]
+      required: [items]
       properties:
         biz_no:
           type: string
+          nullable: true
+          description: 兼容字段，可传可不传；创建时由服务端自动生成并以响应 data.biz_no 为准
         customer_id:
           type: integer
           format: int64
@@ -1401,10 +1727,12 @@ components:
 
     StockCheckCreateRequest:
       type: object
-      required: [biz_no, items]
+      required: [items]
       properties:
         biz_no:
           type: string
+          nullable: true
+          description: 兼容字段，可传可不传；创建时由服务端自动生成并以响应 data.biz_no 为准
         items:
           type: array
           minItems: 1
@@ -1440,7 +1768,7 @@ components:
 
     InboundRequest:
       type: object
-      required: [qty, unit_cost, biz_no]
+      required: [qty]
       properties:
         product_id:
           type: integer
@@ -1452,15 +1780,77 @@ components:
           minimum: 1
         unit_cost:
           type: string
+          description: 入库单次进价（可选）；不传或传空字符串时回落商品当前 cost_price
         expected_version:
           type: integer
         biz_no:
           type: string
+          nullable: true
+          description: 兼容字段，可传可不传；创建时由服务端自动生成并以响应 data.biz_no 为准
         remark:
           type: string
       anyOf:
         - required: [product_id]
         - required: [barcode]
+
+    InboundBatchItemRequest:
+      type: object
+      required: [qty]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        barcode:
+          type: string
+        qty:
+          type: integer
+          minimum: 1
+        unit_cost:
+          type: string
+          description: 入库单次进价（可选）；不传或传空字符串时回落商品当前 cost_price
+        expected_version:
+          type: integer
+        remark:
+          type: string
+      anyOf:
+        - required: [product_id]
+        - required: [barcode]
+
+    InboundBatchRequest:
+      type: object
+      required: [items]
+      properties:
+        items:
+          type: array
+          minItems: 1
+          items:
+            $ref: '#/components/schemas/InboundBatchItemRequest'
+
+    InventoryBatchItemResultData:
+      type: object
+      required: [product_id, current_stock, cost_price, version]
+      properties:
+        product_id:
+          type: integer
+          format: int64
+        current_stock:
+          type: integer
+        cost_price:
+          type: string
+          description: 当前移动加权成本价（金额字符串，4位小数）
+        version:
+          type: integer
+
+    InventoryBatchResultData:
+      type: object
+      required: [biz_no, items]
+      properties:
+        biz_no:
+          type: string
+        items:
+          type: array
+          items:
+            $ref: '#/components/schemas/InventoryBatchItemResultData'
 
     OutboundItemRequest:
       type: object
@@ -1479,10 +1869,12 @@ components:
 
     OutboundRequest:
       type: object
-      required: [biz_no, items]
+      required: [items]
       properties:
         biz_no:
           type: string
+          nullable: true
+          description: 兼容字段，可传可不传；创建时由服务端自动生成并以响应 data.biz_no 为准
         customer_id:
           type: integer
           format: int64

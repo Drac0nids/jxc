@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
+import { useRoute } from 'vue-router'
 
 import {
   confirmSalesOrderApi,
   createSalesOrderApi,
+  getDashboardOrdersDrilldownApi,
   getSalesOrderApi,
   returnSalesOrderApi,
   voidSalesOrderApi,
@@ -14,6 +16,7 @@ import { useAuthStore } from '@/stores/auth'
 import type {
   SalesOrderCreateItemRequest,
   SalesOrderCreateRequest,
+  DashboardOrdersDrilldownData,
   SalesOrderData,
   StockInsufficientErrorData,
   SalesOrderReturnItemRequest,
@@ -25,15 +28,48 @@ interface SalesCreateItemForm {
   product_id: string
   qty: string
   sell_price: string
+  editable: boolean
 }
 
 interface SalesReturnItemForm {
   local_id: number
   product_id: string
   qty: string
+  editable: boolean
 }
 
 const authStore = useAuthStore()
+const route = useRoute()
+
+function formatToday(): string {
+  const now = new Date()
+  const pad = (value: number): string => value.toString().padStart(2, '0')
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`
+}
+
+function parseDateValue(raw: string): { normalized: string } | { error: string } {
+  const value = raw.trim()
+  const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) {
+    return { error: '日期格式必须为 YYYY-MM-DD' }
+  }
+
+  const year = Number(match[1])
+  const month = Number(match[2])
+  const day = Number(match[3])
+  const date = new Date(year, month - 1, day)
+
+  if (
+    Number.isNaN(date.getTime()) ||
+    date.getFullYear() !== year ||
+    date.getMonth() !== month - 1 ||
+    date.getDate() !== day
+  ) {
+    return { error: '日期不合法，请重新选择' }
+  }
+
+  return { normalized: value }
+}
 
 const loadingCreate = ref(false)
 const loadingQuery = ref(false)
@@ -41,23 +77,18 @@ const loadingConfirm = ref(false)
 const loadingVoid = ref(false)
 const loadingReturn = ref(false)
 const scanLoading = ref(false)
+const drilldownLoading = ref(false)
 
 const errorText = ref('')
 const successText = ref('')
 const scanErrorText = ref('')
 const scanSuccessText = ref('')
+const drilldownErrorText = ref('')
 const orderResult = ref<SalesOrderData | null>(null)
+const drilldownResult = ref<DashboardOrdersDrilldownData | null>(null)
 
 let createItemSeed = 1
 let returnItemSeed = 1
-
-function generateBizNo(): string {
-  const now = new Date()
-  const pad = (value: number): string => value.toString().padStart(2, '0')
-  const timePart = `${now.getFullYear()}${pad(now.getMonth() + 1)}${pad(now.getDate())}${pad(now.getHours())}${pad(now.getMinutes())}${pad(now.getSeconds())}`
-  const randomPart = Math.random().toString(36).slice(2, 6).toUpperCase()
-  return `SO-${timePart}-${randomPart}`
-}
 
 function createCreateItemForm(): SalesCreateItemForm {
   return {
@@ -65,6 +96,7 @@ function createCreateItemForm(): SalesCreateItemForm {
     product_id: '',
     qty: '1',
     sell_price: '',
+    editable: false,
   }
 }
 
@@ -73,14 +105,14 @@ function createReturnItemForm(): SalesReturnItemForm {
     local_id: returnItemSeed++,
     product_id: '',
     qty: '1',
+    editable: false,
   }
 }
 
 const createForm = reactive({
-  biz_no: generateBizNo(),
   customer_id: '',
   remark: '',
-  items: [createCreateItemForm()] as SalesCreateItemForm[],
+  items: [] as SalesCreateItemForm[],
 })
 
 const scanForm = reactive({
@@ -99,12 +131,34 @@ const actionForm = reactive({
 const returnForm = reactive({
   expected_version: '',
   remark: '',
-  items: [createReturnItemForm()] as SalesReturnItemForm[],
+  items: [] as SalesReturnItemForm[],
 })
 
 const canOperate = computed(() => {
   const role = authStore.session?.user.role
   return role === 'OWNER' || role === 'SALES'
+})
+
+const drilldownQuery = reactive({
+  start_date: formatToday(),
+  end_date: formatToday(),
+  page: '1',
+  page_size: '20',
+})
+
+const drilldownCurrentPage = computed(() => {
+  const page = Number(drilldownQuery.page)
+  return Number.isInteger(page) && page > 0 ? page : 1
+})
+
+const drilldownPageSize = computed(() => {
+  const pageSize = Number(drilldownQuery.page_size)
+  return Number.isInteger(pageSize) && pageSize > 0 ? pageSize : 20
+})
+
+const drilldownTotalPages = computed(() => {
+  const total = drilldownResult.value?.total ?? 0
+  return Math.max(1, Math.ceil(total / drilldownPageSize.value))
 })
 
 const busy = computed(
@@ -119,6 +173,135 @@ const busy = computed(
 function clearMessage(): void {
   errorText.value = ''
   successText.value = ''
+}
+
+function readSingleQueryParam(raw: unknown): string | null {
+  if (typeof raw === 'string') {
+    return raw
+  }
+  if (Array.isArray(raw) && raw.length > 0) {
+    const first = raw[0]
+    return typeof first === 'string' ? first : null
+  }
+  return null
+}
+
+function parsePositiveIntOrDefault(raw: string | null, fallback: number): number {
+  if (!raw) {
+    return fallback
+  }
+
+  const value = Number(raw)
+  if (!Number.isInteger(value) || value <= 0) {
+    return fallback
+  }
+
+  return value
+}
+
+function initDrilldownFromRouteQuery(): void {
+  const today = formatToday()
+  const startDateFromQuery = readSingleQueryParam(route.query.start_date)
+  const endDateFromQuery = readSingleQueryParam(route.query.end_date)
+
+  const startParsed = startDateFromQuery ? parseDateValue(startDateFromQuery) : { normalized: today }
+  const endParsed = endDateFromQuery ? parseDateValue(endDateFromQuery) : { normalized: today }
+
+  drilldownQuery.start_date = 'error' in startParsed ? today : startParsed.normalized
+  drilldownQuery.end_date = 'error' in endParsed ? today : endParsed.normalized
+  drilldownQuery.page = String(parsePositiveIntOrDefault(readSingleQueryParam(route.query.page), 1))
+
+  const pageSize = parsePositiveIntOrDefault(readSingleQueryParam(route.query.page_size), 20)
+  drilldownQuery.page_size = String(Math.min(Math.max(pageSize, 1), 100))
+}
+
+function validateDrilldownQuery(): string | null {
+  if (!canOperate.value) {
+    return '当前角色无销售单下钻权限，仅 OWNER/SALES 可查看'
+  }
+
+  const startParsed = parseDateValue(drilldownQuery.start_date)
+  if ('error' in startParsed) {
+    return startParsed.error
+  }
+
+  const endParsed = parseDateValue(drilldownQuery.end_date)
+  if ('error' in endParsed) {
+    return endParsed.error
+  }
+
+  if (startParsed.normalized > endParsed.normalized) {
+    return '开始日期不能晚于结束日期'
+  }
+
+  const page = Number(drilldownQuery.page)
+  if (!Number.isInteger(page) || page <= 0) {
+    return '页码必须为正整数'
+  }
+
+  const pageSize = Number(drilldownQuery.page_size)
+  if (!Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100) {
+    return '每页条数必须为 1 ~ 100 的整数'
+  }
+
+  return null
+}
+
+async function fetchOrdersDrilldown(options?: { resetPage?: boolean }): Promise<void> {
+  if (options?.resetPage) {
+    drilldownQuery.page = '1'
+  }
+
+  drilldownErrorText.value = ''
+  const validationError = validateDrilldownQuery()
+  if (validationError) {
+    drilldownErrorText.value = validationError
+    drilldownResult.value = null
+    return
+  }
+
+  drilldownLoading.value = true
+  try {
+    const response = await getDashboardOrdersDrilldownApi({
+      start_date: drilldownQuery.start_date,
+      end_date: drilldownQuery.end_date,
+      page: Number(drilldownQuery.page),
+      page_size: Number(drilldownQuery.page_size),
+    })
+    drilldownResult.value = response.data
+    drilldownQuery.start_date = response.data.start_date
+    drilldownQuery.end_date = response.data.end_date
+    drilldownQuery.page = String(response.data.page)
+    drilldownQuery.page_size = String(response.data.page_size)
+  } catch (error) {
+    drilldownErrorText.value = formatApiError(error, '订单下钻查询失败')
+  } finally {
+    drilldownLoading.value = false
+  }
+}
+
+function resetDrilldownToToday(): void {
+  const today = formatToday()
+  drilldownQuery.start_date = today
+  drilldownQuery.end_date = today
+  drilldownQuery.page = '1'
+  void fetchOrdersDrilldown()
+}
+
+function prevDrilldownPage(): void {
+  if (drilldownCurrentPage.value <= 1) {
+    return
+  }
+  drilldownQuery.page = String(drilldownCurrentPage.value - 1)
+  void fetchOrdersDrilldown()
+}
+
+function nextDrilldownPage(): void {
+  if (drilldownCurrentPage.value >= drilldownTotalPages.value) {
+    return
+  }
+  drilldownQuery.page = String(drilldownCurrentPage.value + 1)
+  void fetchOrdersDrilldown()
 }
 
 function resetScanForm(): void {
@@ -154,11 +337,15 @@ function addCreateItem(): void {
   createForm.items.push(createCreateItemForm())
 }
 
-function removeCreateItem(localId: number): void {
-  if (createForm.items.length <= 1) {
+function toggleCreateItemEditable(localId: number): void {
+  const target = createForm.items.find((item) => item.local_id === localId)
+  if (!target) {
     return
   }
+  target.editable = !target.editable
+}
 
+function removeCreateItem(localId: number): void {
   const index = createForm.items.findIndex((item) => item.local_id === localId)
   if (index >= 0) {
     createForm.items.splice(index, 1)
@@ -169,11 +356,15 @@ function addReturnItem(): void {
   returnForm.items.push(createReturnItemForm())
 }
 
-function removeReturnItem(localId: number): void {
-  if (returnForm.items.length <= 1) {
+function toggleReturnItemEditable(localId: number): void {
+  const target = returnForm.items.find((item) => item.local_id === localId)
+  if (!target) {
     return
   }
+  target.editable = !target.editable
+}
 
+function removeReturnItem(localId: number): void {
   const index = returnForm.items.findIndex((item) => item.local_id === localId)
   if (index >= 0) {
     returnForm.items.splice(index, 1)
@@ -181,26 +372,37 @@ function removeReturnItem(localId: number): void {
 }
 
 function resetCreateForm(): void {
-  createForm.biz_no = generateBizNo()
   createForm.customer_id = ''
   createForm.remark = ''
-  createForm.items = [createCreateItemForm()]
+  createForm.items = []
   resetScanForm()
 }
 
 function resetReturnForm(): void {
   returnForm.expected_version = orderResult.value ? String(orderResult.value.version) : ''
   returnForm.remark = ''
-  returnForm.items = [createReturnItemForm()]
+  returnForm.items = []
+}
+
+function isBlankCreateItem(item: SalesCreateItemForm): boolean {
+  return !item.product_id.trim() && !item.qty.trim() && !item.sell_price.trim()
+}
+
+function getEffectiveCreateItems(items: SalesCreateItemForm[]): SalesCreateItemForm[] {
+  return items.filter((item) => !isBlankCreateItem(item))
+}
+
+function isBlankReturnItem(item: SalesReturnItemForm): boolean {
+  return !item.product_id.trim() && !item.qty.trim()
+}
+
+function getEffectiveReturnItems(items: SalesReturnItemForm[]): SalesReturnItemForm[] {
+  return items.filter((item) => !isBlankReturnItem(item))
 }
 
 function validateCreateForm(): string | null {
   if (!canOperate.value) {
     return '当前角色无销售单操作权限，仅 OWNER/SALES 可操作'
-  }
-
-  if (!createForm.biz_no.trim()) {
-    return '请输入销售单业务单号'
   }
 
   if (createForm.customer_id.trim()) {
@@ -210,13 +412,14 @@ function validateCreateForm(): string | null {
     }
   }
 
-  if (createForm.items.length === 0) {
+  const effectiveItems = getEffectiveCreateItems(createForm.items)
+  if (effectiveItems.length === 0) {
     return '请至少填写一条销售明细'
   }
 
-  for (let index = 0; index < createForm.items.length; index += 1) {
+  for (let index = 0; index < effectiveItems.length; index += 1) {
     const row = index + 1
-    const item = createForm.items[index]
+    const item = effectiveItems[index]
     if (!item) {
       return `第 ${row} 行明细不存在，请重试`
     }
@@ -278,13 +481,14 @@ function validateReturnForm(): string | null {
     return '退货版本必须为大于等于 0 的整数'
   }
 
-  if (returnForm.items.length === 0) {
+  const effectiveItems = getEffectiveReturnItems(returnForm.items)
+  if (effectiveItems.length === 0) {
     return '请至少填写一条退货明细'
   }
 
-  for (let index = 0; index < returnForm.items.length; index += 1) {
+  for (let index = 0; index < effectiveItems.length; index += 1) {
     const row = index + 1
-    const item = returnForm.items[index]
+    const item = effectiveItems[index]
     if (!item) {
       return `第 ${row} 行退货明细不存在，请重试`
     }
@@ -304,14 +508,13 @@ function validateReturnForm(): string | null {
 }
 
 function buildCreatePayload(): SalesOrderCreateRequest {
-  const items: SalesOrderCreateItemRequest[] = createForm.items.map((item) => ({
+  const items: SalesOrderCreateItemRequest[] = getEffectiveCreateItems(createForm.items).map((item) => ({
     product_id: Number(item.product_id.trim()),
     qty: Number(item.qty.trim()),
     sell_price: item.sell_price.trim(),
   }))
 
   const payload: SalesOrderCreateRequest = {
-    biz_no: createForm.biz_no.trim(),
     items,
   }
 
@@ -329,7 +532,7 @@ function buildCreatePayload(): SalesOrderCreateRequest {
 }
 
 function buildReturnPayload(): SalesOrderReturnRequest {
-  const items: SalesOrderReturnItemRequest[] = returnForm.items.map((item) => ({
+  const items: SalesOrderReturnItemRequest[] = getEffectiveReturnItems(returnForm.items).map((item) => ({
     product_id: Number(item.product_id.trim()),
     qty: Number(item.qty.trim()),
   }))
@@ -428,6 +631,11 @@ async function scanAndAccumulateCreateItem(): Promise<void> {
     const response = await scanProductApi(barcode)
     const productId = String(response.data.id)
     const sellPrice = customSellPrice || response.data.retail_price
+
+    const effectiveItems = getEffectiveCreateItems(createForm.items)
+    if (effectiveItems.length !== createForm.items.length) {
+      createForm.items = effectiveItems
+    }
 
     const existed = createForm.items.find((item) => item.product_id.trim() === productId)
     if (existed) {
@@ -592,6 +800,13 @@ async function returnOrder(): Promise<void> {
     loadingReturn.value = false
   }
 }
+
+onMounted(() => {
+  initDrilldownFromRouteQuery()
+  if (canOperate.value) {
+    void fetchOrdersDrilldown()
+  }
+})
 </script>
 
 <template>
@@ -599,6 +814,113 @@ async function returnOrder(): Promise<void> {
     <h2>销售单状态流（创建 / 查询 / 确认 / 作废 / 退货）</h2>
 
     <p v-if="!canOperate" class="warn-text">当前角色无销售单操作权限，仅 OWNER/SALES 可操作。</p>
+
+    <div class="card-panel form-grid" style="margin-bottom: 12px">
+      <h3>订单下钻列表（来自经营看板订单数）</h3>
+
+      <form class="form-inline" @submit.prevent="fetchOrdersDrilldown({ resetPage: true })">
+        <label class="form-label inline">
+          <span>开始日期</span>
+          <input v-model="drilldownQuery.start_date" :disabled="drilldownLoading" type="date" />
+        </label>
+
+        <label class="form-label inline">
+          <span>结束日期</span>
+          <input v-model="drilldownQuery.end_date" :disabled="drilldownLoading" type="date" />
+        </label>
+
+        <label class="form-label inline">
+          <span>每页</span>
+          <input
+            v-model="drilldownQuery.page_size"
+            :disabled="drilldownLoading"
+            type="number"
+            min="1"
+            max="100"
+            style="width: 90px"
+          />
+        </label>
+
+        <button class="btn" type="submit" :disabled="drilldownLoading || !canOperate">
+          {{ drilldownLoading ? '查询中...' : '查询下钻订单' }}
+        </button>
+        <button class="btn btn-secondary" type="button" :disabled="drilldownLoading" @click="resetDrilldownToToday">
+          重置为今天
+        </button>
+      </form>
+
+      <p v-if="drilldownErrorText" class="error-text">{{ drilldownErrorText }}</p>
+
+      <p v-if="drilldownResult" class="table-summary">
+        区间：{{ drilldownResult.start_date }} ~ {{ drilldownResult.end_date }}；共 {{ drilldownResult.total }} 单；当前第
+        {{ drilldownResult.page }} / {{ drilldownTotalPages }} 页
+      </p>
+
+      <div class="order-receipt-list" v-if="drilldownResult">
+        <article
+          v-for="(item, index) in drilldownResult.list"
+          :key="`${item.biz_no}-${index}`"
+          class="order-receipt-card"
+        >
+          <header class="order-receipt-head">
+            <div>
+              <p class="order-receipt-biz">{{ item.biz_no }}</p>
+              <p class="order-receipt-id">销售单ID：{{ item.id }}</p>
+            </div>
+
+            <div class="order-receipt-head-meta">
+              <span class="order-status-badge">{{ item.status }}</span>
+              <strong class="order-receipt-total">总金额：{{ item.total_amount }}</strong>
+            </div>
+          </header>
+
+          <div class="table-wrapper" v-if="item.items.length > 0">
+            <table class="data-table data-table-compact">
+              <thead>
+                <tr>
+                  <th>商品名称</th>
+                  <th>数量</th>
+                  <th>单价</th>
+                  <th>小计</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-for="(line, lineIndex) in item.items" :key="`${item.biz_no}-${line.product_id}-${lineIndex}`">
+                  <td>{{ line.product_name }}</td>
+                  <td>{{ line.qty }}</td>
+                  <td>{{ line.sell_price }}</td>
+                  <td>{{ line.line_amount }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+
+          <p v-else class="order-empty-note">无明细（聚合行）</p>
+
+          <footer class="order-receipt-foot">
+            <p>创建时间：{{ item.created_at }}</p>
+            <p>更新时间：{{ item.updated_at }}</p>
+            <p>备注：{{ item.remark ?? '-' }}</p>
+          </footer>
+        </article>
+
+        <p v-if="drilldownResult.list.length === 0" class="empty-cell order-receipt-empty">当前筛选条件下暂无订单。</p>
+      </div>
+
+      <div class="form-actions" v-if="drilldownResult">
+        <button class="btn btn-secondary" type="button" :disabled="drilldownLoading || drilldownCurrentPage <= 1" @click="prevDrilldownPage">
+          上一页
+        </button>
+        <button
+          class="btn btn-secondary"
+          type="button"
+          :disabled="drilldownLoading || drilldownCurrentPage >= drilldownTotalPages"
+          @click="nextDrilldownPage"
+        >
+          下一页
+        </button>
+      </div>
+    </div>
 
     <div class="card-panel form-grid" style="margin-bottom: 12px">
       <h3>扫码选品（创建销售单）</h3>
@@ -623,7 +945,7 @@ async function returnOrder(): Promise<void> {
         </label>
 
         <button class="btn" type="submit" :disabled="busy || scanLoading || !canOperate">
-          {{ scanLoading ? '识别中...' : '扫码并累加' }}
+          {{ scanLoading ? '识别中...' : '按条码加入明细' }}
         </button>
         <button class="btn btn-secondary" type="button" :disabled="busy || scanLoading" @click="resetScanForm">
           清空
@@ -639,11 +961,6 @@ async function returnOrder(): Promise<void> {
       <h3>1）创建销售单</h3>
 
       <div class="form-inline form-inline-compact">
-        <label class="form-label inline">
-          <span>业务单号 *</span>
-          <input v-model="createForm.biz_no" :disabled="busy" placeholder="例如：SO-20260306-0001" />
-        </label>
-
         <label class="form-label inline">
           <span>客户ID</span>
           <input v-model="createForm.customer_id" :disabled="busy" placeholder="可选，正整数" />
@@ -678,24 +995,48 @@ async function returnOrder(): Promise<void> {
               <tr v-for="(item, index) in createForm.items" :key="item.local_id">
                 <td>{{ index + 1 }}</td>
                 <td>
-                  <input v-model="item.product_id" class="table-input" :disabled="busy" placeholder="1001" />
+                  <input
+                    v-model="item.product_id"
+                    class="table-input"
+                    :readonly="!item.editable || busy"
+                    :disabled="busy"
+                    placeholder="1001"
+                  />
                 </td>
                 <td>
-                  <input v-model="item.qty" class="table-input" :disabled="busy" placeholder="1" />
+                  <input
+                    v-model="item.qty"
+                    class="table-input"
+                    :readonly="!item.editable || busy"
+                    :disabled="busy"
+                    placeholder="1"
+                  />
                 </td>
                 <td>
-                  <input v-model="item.sell_price" class="table-input" :disabled="busy" placeholder="3.50" />
+                  <input
+                    v-model="item.sell_price"
+                    class="table-input"
+                    :readonly="!item.editable || busy"
+                    :disabled="busy"
+                    placeholder="3.50"
+                  />
                 </td>
                 <td>
+                  <button class="btn btn-secondary" type="button" :disabled="busy" @click="toggleCreateItemEditable(item.local_id)">
+                    {{ item.editable ? '完成' : '编辑' }}
+                  </button>
                   <button
                     class="btn btn-danger"
                     type="button"
-                    :disabled="busy || createForm.items.length <= 1"
+                    :disabled="busy"
                     @click="removeCreateItem(item.local_id)"
                   >
                     删除
                   </button>
                 </td>
+              </tr>
+              <tr v-if="createForm.items.length === 0">
+                <td colspan="5" class="empty-cell">暂无明细，请先扫码或点击“新增明细”。</td>
               </tr>
             </tbody>
           </table>
@@ -782,21 +1123,39 @@ async function returnOrder(): Promise<void> {
               <tr v-for="(item, index) in returnForm.items" :key="item.local_id">
                 <td>{{ index + 1 }}</td>
                 <td>
-                  <input v-model="item.product_id" class="table-input" :disabled="busy" placeholder="1001" />
+                  <input
+                    v-model="item.product_id"
+                    class="table-input"
+                    :readonly="!item.editable || busy"
+                    :disabled="busy"
+                    placeholder="1001"
+                  />
                 </td>
                 <td>
-                  <input v-model="item.qty" class="table-input" :disabled="busy" placeholder="1" />
+                  <input
+                    v-model="item.qty"
+                    class="table-input"
+                    :readonly="!item.editable || busy"
+                    :disabled="busy"
+                    placeholder="1"
+                  />
                 </td>
                 <td>
+                  <button class="btn btn-secondary" type="button" :disabled="busy" @click="toggleReturnItemEditable(item.local_id)">
+                    {{ item.editable ? '完成' : '编辑' }}
+                  </button>
                   <button
                     class="btn btn-danger"
                     type="button"
-                    :disabled="busy || returnForm.items.length <= 1"
+                    :disabled="busy"
                     @click="removeReturnItem(item.local_id)"
                   >
                     删除
                   </button>
                 </td>
+              </tr>
+              <tr v-if="returnForm.items.length === 0">
+                <td colspan="4" class="empty-cell">暂无退货明细，请点击“新增退货明细”。</td>
               </tr>
             </tbody>
           </table>
@@ -836,8 +1195,10 @@ async function returnOrder(): Promise<void> {
           <thead>
             <tr>
               <th>商品ID</th>
+              <th>商品名称</th>
               <th>销售数量</th>
               <th>销售单价</th>
+              <th>行小计</th>
               <th>已退数量</th>
               <th>可退数量</th>
             </tr>
@@ -845,8 +1206,10 @@ async function returnOrder(): Promise<void> {
           <tbody>
             <tr v-for="(item, index) in orderResult.items" :key="`${item.product_id}-${index}`">
               <td>{{ item.product_id }}</td>
+              <td>{{ item.product_name }}</td>
               <td>{{ item.qty }}</td>
               <td>{{ item.sell_price }}</td>
+              <td>{{ item.line_amount }}</td>
               <td>{{ item.returned_qty }}</td>
               <td>{{ Math.max(item.qty - item.returned_qty, 0) }}</td>
             </tr>

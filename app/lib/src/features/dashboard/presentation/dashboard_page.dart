@@ -13,19 +13,25 @@ import '../../inventory/application/stock_check_logs_controller.dart';
 import '../../inventory/presentation/inbound_page.dart';
 import '../../inventory/presentation/outbound_page.dart';
 import '../../inventory/presentation/stock_check_page.dart';
+import '../../products/application/batch_controller.dart';
+import '../../products/application/category_controller.dart';
 import '../../products/application/low_stock_controller.dart';
 import '../../products/application/product_controller.dart';
+import '../../products/models/batch_models.dart';
+import '../../products/presentation/batch_management_page.dart';
 import '../../products/presentation/low_stock_page.dart';
 import '../../products/presentation/products_page.dart';
 import '../../users/application/users_controller.dart';
 import '../../users/presentation/users_page.dart';
 import '../application/dashboard_controller.dart';
 import '../application/dashboard_orders_controller.dart';
+import '../application/top_sales_controller.dart';
 import '../application/trend_controller.dart';
 import '../models/dashboard_data.dart';
 import 'dashboard_orders_page.dart';
 import 'profit_trend_page.dart';
 import 'sales_trend_page.dart';
+import 'top_sales_page.dart';
 
 // ════════════════════════════════════════════════════════════════════════════
 // Quick-action item model
@@ -69,6 +75,7 @@ class DashboardPage extends StatefulWidget {
     required this.dashboardController,
     required this.dashboardOrdersController,
     required this.trendController,
+    required this.topSalesController,
     required this.lowStockController,
     required this.inboundController,
     required this.outboundController,
@@ -76,6 +83,8 @@ class DashboardPage extends StatefulWidget {
     required this.stockCheckLogsController,
     required this.stockCheckController,
     required this.productController,
+    required this.categoryController,
+    required this.batchController,
     required this.usersController,
   });
 
@@ -84,6 +93,7 @@ class DashboardPage extends StatefulWidget {
   final DashboardController dashboardController;
   final DashboardOrdersController dashboardOrdersController;
   final TrendController trendController;
+  final TopSalesController topSalesController;
   final LowStockController lowStockController;
   final InboundController inboundController;
   final OutboundController outboundController;
@@ -91,23 +101,56 @@ class DashboardPage extends StatefulWidget {
   final StockCheckLogsController stockCheckLogsController;
   final StockCheckController stockCheckController;
   final ProductController productController;
+  final CategoryController categoryController;
+  final BatchController batchController;
   final UsersController usersController;
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
-class _DashboardPageState extends State<DashboardPage> {
+class _DashboardPageState extends State<DashboardPage>
+    with WidgetsBindingObserver {
   static const int _defaultPageSize = 10;
 
   // Selected query date (DateTime for consistency with brand_ui pattern)
   DateTime _queryDate = DateUtils.dateOnly(DateTime.now());
 
+  /// 上次自动刷新的时间，用于防止频繁触发
+  DateTime? _lastAutoRefresh;
+
+  /// 两次自动刷新的最短间隔
+  static const Duration _minRefreshInterval = Duration(seconds: 30);
+
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance
-        .addPostFrameCallback((_) => _load());
+    WidgetsBinding.instance.addObserver(this);
+    WidgetsBinding.instance.addPostFrameCallback((_) => _load());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// App 从后台切回前台时自动刷新
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _autoRefresh();
+    }
+  }
+
+  /// 智能刷新：距上次刷新超过最短间隔才执行
+  void _autoRefresh() {
+    final now = DateTime.now();
+    if (_lastAutoRefresh == null ||
+        now.difference(_lastAutoRefresh!) > _minRefreshInterval) {
+      _lastAutoRefresh = now;
+      _load();
+    }
   }
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -125,7 +168,10 @@ class _DashboardPageState extends State<DashboardPage> {
   // ── Queries ──────────────────────────────────────────────────────────────
 
   Future<void> _load() async {
-    await widget.dashboardController.load(date: _fmtDate(_queryDate));
+    await Future.wait(<Future<void>>[
+      widget.dashboardController.load(date: _fmtDate(_queryDate)),
+      widget.batchController.loadExpiring(withinDays: 30),
+    ]);
   }
 
   void _applyDate(DateTime d) {
@@ -207,14 +253,53 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _handleLowStockTap() async {
     if (!mounted) return;
+    final session = widget.sessionController.session;
+    final scope = session == null
+        ? ''
+        : '${session.tenantId}:${session.user.id}';
+    final canInbound = session?.user.role == UserRole.owner ||
+        session?.user.role == UserRole.purchaser;
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) => LowStockPage(controller: widget.lowStockController),
+        builder: (_) => LowStockPage(
+          controller: widget.lowStockController,
+          onGoInbound: canInbound
+              ? () async {
+                  await Navigator.of(context).push(MaterialPageRoute<void>(
+                    builder: (_) => InboundPage(
+                      controller: widget.inboundController,
+                      productController: widget.productController,
+                      sessionStorage: widget.sessionStorage,
+                      scanPreferenceScope: scope,
+                      logsController: widget.inboundLogsController,
+                      batchController: widget.batchController,
+                    ),
+                  ));
+                  // 公局入库页返回后刷新看板
+                  if (mounted) _load();
+                }
+              : null,
+        ),
+      ),
+    );
+    // 从低库存页返回后刷新看板（可能看过数据后用户希望首页同步）
+    if (mounted) _autoRefresh();
+  }
+
+  Future<void> _handleTopSalesTap() async {
+    if (!mounted) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => TopSalesPage(
+          controller: widget.topSalesController,
+          initialDate: _fmtDate(_queryDate),
+        ),
       ),
     );
   }
 
-  void _handleQuickActionTap(_QuickActionType type) {
+  /// 快捷入口导航——所有操作页返回后自动刷新看板
+  Future<void> _handleQuickActionTap(_QuickActionType type) async {
     final session = widget.sessionController.session;
     final scope = session == null
         ? ''
@@ -222,35 +307,60 @@ class _DashboardPageState extends State<DashboardPage> {
 
     switch (type) {
       case _QuickActionType.inbound:
-
-        Navigator.of(context).push(MaterialPageRoute<void>(
+        // await 返回后刷新看板（入库会改变库存和成本）
+        await Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => InboundPage(
             controller: widget.inboundController,
             productController: widget.productController,
             sessionStorage: widget.sessionStorage,
             scanPreferenceScope: scope,
             logsController: widget.inboundLogsController,
+            batchController: widget.batchController,
           ),
         ));
+        if (mounted) _load(); // 入库可能改变库存/成本，强制刷新
+
       case _QuickActionType.outbound:
-        Navigator.of(context).push(MaterialPageRoute<void>(
+        // await 返回后刷新看板（出库会改变库存和销售指标）
+        await Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => OutboundPage(
             controller: widget.outboundController,
             sessionStorage: widget.sessionStorage,
             scanPreferenceScope: scope,
+            onViewHistory: () {
+              final now = DateTime.now();
+              final today =
+                  '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+              Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => DashboardOrdersPage(
+                  controller: widget.dashboardOrdersController,
+                  initialStartDate: today,
+                  initialEndDate: today,
+                  initialPageSize: 10,
+                ),
+              ));
+            },
           ),
         ));
+        if (mounted) _load(); // 出库可能改变销售额/订单数，强制刷新
+
       case _QuickActionType.stockCheck:
-        Navigator.of(context).push(MaterialPageRoute<void>(
+        // await 返回后刷新看板（盘点可能改变库存）
+        await Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => StockCheckPage(
             controller: widget.stockCheckController,
             logsController: widget.stockCheckLogsController,
           ),
         ));
+        if (mounted) _autoRefresh(); // 盘点返回用防抖，避免搞盘点连点进出反复请求
+
       case _QuickActionType.products:
-        Navigator.of(context).push(MaterialPageRoute<void>(
+        // await 返回后刷新批次预警（用户可能新建批次或标记售完）
+        await Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => ProductsPage(
             controller: widget.productController,
+            categoryController: widget.categoryController,
+            batchController: widget.batchController,
             onStockCheck: (int productId) {
               Navigator.of(context).push(MaterialPageRoute<void>(
                 builder: (_) => StockCheckPage(
@@ -262,14 +372,20 @@ class _DashboardPageState extends State<DashboardPage> {
             },
           ),
         ));
+        if (mounted) {
+          // 商品页可能添加/编辑批次，刷新批次预警卡片
+          widget.batchController.loadExpiring(withinDays: 30);
+        }
+
       case _QuickActionType.users:
         final selfId = widget.sessionController.session?.user.id ?? '';
-        Navigator.of(context).push(MaterialPageRoute<void>(
+        await Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => UsersPage(
             controller: widget.usersController,
             currentUserId: selfId,
           ),
         ));
+        // 人员管理返回无需刷新看板数据
     }
   }
 
@@ -482,8 +598,36 @@ class _DashboardPageState extends State<DashboardPage> {
                     value: dashboard.topSellingItem,
                     icon: Icons.local_fire_department_rounded,
                     accentColor: const Color(0xFFF97316),
+                    onTap: _handleTopSalesTap,
                   ),
                 ],
+                const SizedBox(height: 16),
+
+                // ── 临期批次预警 ██████████████████████████████████████████
+                AnimatedBuilder(
+                  animation: widget.batchController,
+                  builder: (_, __) {
+                    final expiring = widget.batchController.expiring;
+                    final loading = widget.batchController.loading;
+                    // 加载中时不渲染（避免闪烁）
+                    if (loading && expiring.isEmpty) return const SizedBox.shrink();
+                    return _ExpiringBatchesCard(
+                      items: expiring,
+                      onMarkSoldOut: (int id) async {
+                        await widget.batchController.markSoldOut(id);
+                      },
+                      onViewAll: (int productId, String productName) {
+                        Navigator.of(context).push(MaterialPageRoute<void>(
+                          builder: (_) => BatchManagementPage(
+                            productId: productId,
+                            productName: productName,
+                            controller: widget.batchController,
+                          ),
+                        ));
+                      },
+                    );
+                  },
+                ),
                 const SizedBox(height: 16),
 
                 // ── Quick Actions ──────────────────────────────────────────
@@ -525,6 +669,191 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
         );
       },
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 临期批次预警卡片
+// ════════════════════════════════════════════════════════════════════════════
+
+class _ExpiringBatchesCard extends StatelessWidget {
+  const _ExpiringBatchesCard({
+    required this.items,
+    required this.onMarkSoldOut,
+    required this.onViewAll,
+  });
+
+  final List<ExpiringBatchData> items;
+  final Future<void> Function(int batchId) onMarkSoldOut;
+  final void Function(int productId, String productName) onViewAll;
+
+  @override
+  Widget build(BuildContext context) {
+    if (items.isEmpty) {
+      // 空状态：绿色安全提示
+      return SectionCard(
+        title: '批次效期监控',
+        subtitle: '30天内到期提醒',
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withAlpha(26),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.verified_rounded,
+                  color: Color(0xFF10B981),
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              const Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      '暂无临期批次',
+                      style: TextStyle(
+                        fontSize: 14,
+                        fontWeight: FontWeight.w600,
+                        color: Color(0xFF10B981),
+                      ),
+                    ),
+                    SizedBox(height: 2),
+                    Text(
+                      '近 30 天内所有批次均安全',
+                      style: TextStyle(fontSize: 12, color: Colors.grey),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      );
+    }
+
+    return SectionCard(
+      title: '批次效期监控',
+      subtitle: '${items.length} 个批次需关注',
+      child: Column(
+        children: <Widget>[
+          for (final ExpiringBatchData item in items.take(5))
+            _ExpiringRow(
+              item: item,
+              onMarkSoldOut: onMarkSoldOut,
+              onViewAll: onViewAll,
+            ),
+          if (items.length > 5)
+            Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: Center(
+                child: Text(
+                  '还有 ${items.length - 5} 条预警未显示',
+                  style: const TextStyle(
+                      fontSize: 12, color: Colors.grey),
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ExpiringRow extends StatelessWidget {
+  const _ExpiringRow({
+    required this.item,
+    required this.onMarkSoldOut,
+    required this.onViewAll,
+  });
+
+  final ExpiringBatchData item;
+  final Future<void> Function(int) onMarkSoldOut;
+  final void Function(int, String) onViewAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final batch = item.batch;
+    final level = batch.expiryLevel;
+    final color = switch (level) {
+      BatchExpiryLevel.expired => Colors.grey.shade600,
+      BatchExpiryLevel.critical => Colors.red.shade600,
+      BatchExpiryLevel.warning => Colors.orange.shade600,
+      _ => Colors.amber.shade700,
+    };
+    final statusText = switch (level) {
+      BatchExpiryLevel.expired => '已过期',
+      _ => '${batch.daysUntilExpiry}天后过期',
+    };
+
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      padding: const EdgeInsets.all(10),
+      decoration: BoxDecoration(
+        color: color.withAlpha(15),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withAlpha(51)),
+      ),
+      child: Row(
+        children: <Widget>[
+          Container(
+            width: 4,
+            height: 40,
+            decoration: BoxDecoration(
+              color: color,
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  item.productName,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w600),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                const SizedBox(height: 2),
+                Text(
+                  '批次：${batch.lotNumber}  ·  $statusText',
+                  style: TextStyle(fontSize: 11, color: color),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Column(
+            children: <Widget>[
+              GestureDetector(
+                onTap: () => onViewAll(batch.productId, item.productName),
+                child: Text('查看',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: cs.primary,
+                        fontWeight: FontWeight.w500)),
+              ),
+              const SizedBox(height: 4),
+              GestureDetector(
+                onTap: () => onMarkSoldOut(batch.id),
+                child: Text('售完',
+                    style: TextStyle(
+                        fontSize: 11, color: Colors.grey.shade500)),
+              ),
+            ],
+          ),
+        ],
+      ),
     );
   }
 }

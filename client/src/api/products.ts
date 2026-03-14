@@ -1,4 +1,5 @@
 import type {
+  BarcodeLookupData,
   CreateProductRequest,
   DeleteProductQuery,
   DeleteProductResponseData,
@@ -46,6 +47,16 @@ export async function scanProductApi(barcode: string) {
   return requestApi<ScanProductData>({
     method: 'get',
     url: '/products/scan',
+    params: {
+      barcode,
+    },
+  })
+}
+
+export async function barcodeLookupProductNameApi(barcode: string) {
+  return requestApi<BarcodeLookupData>({
+    method: 'get',
+    url: '/products/barcode-lookup',
     params: {
       barcode,
     },
