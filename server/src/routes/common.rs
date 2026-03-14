@@ -487,6 +487,7 @@ pub struct AuditLogData {
 pub struct StockLogData {
     pub id: i64,
     pub product_id: i64,
+    pub product_name: Option<String>,
     pub biz_type: String,
     pub biz_no: String,
     pub delta_qty: i32,
@@ -495,6 +496,7 @@ pub struct StockLogData {
     pub snapshot_sell_price: Option<String>,
     pub snapshot_inbound_unit_cost: Option<String>,
     pub operator_id: String,
+    pub operator_name: Option<String>,
     pub created_at: String,
 }
 

@@ -4,20 +4,20 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
+use chrono::FixedOffset;
 use serde_json::json;
 use std::cmp::Reverse;
-use chrono::{FixedOffset};
 use uuid::Uuid;
 
+use crate::routes::common::{
+    AuditLogData, AuditLogQuery, StockLogData, StockLogQuery, ensure_role, is_report_date_in_range,
+    load_product_name_map, parse_report_date, postgres_pool_or_none,
+};
 use crate::{
     error::AppError,
-    middleware::{AuthContext},
+    middleware::AuthContext,
     response::{ApiResponse, build_response_headers, resolve_request_id},
     state::AppState,
-};
-use crate::routes::common::{
-    postgres_pool_or_none, ensure_role, parse_report_date, is_report_date_in_range,
-    AuditLogQuery, AuditLogData, StockLogQuery, StockLogData
 };
 
 pub async fn list_audit_logs(
@@ -333,12 +333,18 @@ pub async fn list_stock_logs(
             Some(StockLogData {
                 id: log.id,
                 product_id: log.product_id,
+                product_name: None,
                 biz_type: log.biz_type.clone(),
                 biz_no: log.biz_no.clone(),
                 delta_qty: log.delta_qty,
                 snapshot_stock: log.snapshot_stock,
                 snapshot_cost: log.snapshot_cost.round_dp(4).to_string(),
+                snapshot_sell_price: log.snapshot_sell_price.map(|v| v.round_dp(4).to_string()),
+                snapshot_inbound_unit_cost: log
+                    .snapshot_inbound_unit_cost
+                    .map(|v| v.round_dp(4).to_string()),
                 operator_id: log.operator_id.to_string(),
+                operator_name: None,
                 created_at: log.created_at.clone(),
             })
         })
@@ -346,13 +352,36 @@ pub async fn list_stock_logs(
 
     filtered.sort_by_key(|entry| Reverse(entry.id));
 
+    // 商品名称映射
+    let product_name_map = load_product_name_map(&state, auth.tenant_id, &request_id)
+        .await
+        .unwrap_or_default();
+
+    // 操作人姓名映射
+    let users = state
+        .repository
+        .list_users_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+        .await
+        .unwrap_or_default();
+    let user_name_map: std::collections::HashMap<String, String> = users
+        .into_iter()
+        .map(|u| (u.id.to_string(), u.name.clone()))
+        .collect();
+
     let total = filtered.len() as u64;
     let start = ((page - 1) * page_size) as usize;
     let end = usize::min(start + page_size as usize, filtered.len());
-    let list = if start >= filtered.len() {
+    let list: Vec<StockLogData> = if start >= filtered.len() {
         Vec::new()
     } else {
-        filtered[start..end].to_vec()
+        filtered[start..end]
+            .iter()
+            .map(|log| StockLogData {
+                product_name: product_name_map.get(&log.product_id).cloned(),
+                operator_name: user_name_map.get(&log.operator_id).cloned(),
+                ..log.clone()
+            })
+            .collect()
     };
 
     let body = ApiResponse::success(
