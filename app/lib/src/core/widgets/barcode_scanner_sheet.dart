@@ -108,7 +108,82 @@ class BarcodeScannerSheet {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 单次扫码弹窗（不变）
+// 手电筒按钮（通用，叠加在取景框右上角）
+// ════════════════════════════════════════════════════════════════════════════
+
+class _TorchButton extends StatelessWidget {
+  const _TorchButton({required this.controller});
+
+  final MobileScannerController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    return ValueListenableBuilder<MobileScannerState>(
+      valueListenable: controller,
+      builder: (_, MobileScannerState state, __) {
+        // 手电筒不可用时（如前置摄像头）不显示按钮
+        if (!state.isInitialized || state.torchState == TorchState.unavailable) {
+          return const SizedBox.shrink();
+        }
+
+        final bool isOn = state.torchState == TorchState.on;
+
+        return GestureDetector(
+          onTap: () => controller.toggleTorch(),
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 200),
+            width: 44,
+            height: 44,
+            decoration: BoxDecoration(
+              color: isOn
+                  ? const Color(0xFFFBBF24).withValues(alpha: 0.92)
+                  : Colors.black.withValues(alpha: 0.45),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isOn ? Icons.flashlight_on_rounded : Icons.flashlight_off_rounded,
+              color: isOn ? Colors.black : Colors.white,
+              size: 22,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 取景框 + 右上角手电筒叠加
+// ════════════════════════════════════════════════════════════════════════════
+
+Widget _buildCameraView({
+  required MobileScannerController controller,
+  required void Function(BarcodeCapture) onDetect,
+}) {
+  return Stack(
+    children: <Widget>[
+      // 取景框
+      Positioned.fill(
+        child: ClipRRect(
+          borderRadius: BorderRadius.circular(12),
+          child: MobileScanner(
+            controller: controller,
+            onDetect: onDetect,
+          ),
+        ),
+      ),
+      // 手电筒按钮（右上角）
+      Positioned(
+        top: 10,
+        right: 10,
+        child: _TorchButton(controller: controller),
+      ),
+    ],
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// 单次扫码弹窗
 // ════════════════════════════════════════════════════════════════════════════
 
 class _BarcodeScannerBottomSheet extends StatelessWidget {
@@ -146,19 +221,17 @@ class _BarcodeScannerBottomSheet extends StatelessWidget {
               ),
             ),
             const SizedBox(height: 12),
-            Text(title,
-                style:
-                    const TextStyle(fontSize: 16, fontWeight: FontWeight.w600)),
+            Text(
+              title,
+              style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
+            ),
             const SizedBox(height: 4),
             Text(hint),
             const SizedBox(height: 12),
             Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: MobileScanner(
-                  controller: controller,
-                  onDetect: onDetect,
-                ),
+              child: _buildCameraView(
+                controller: controller,
+                onDetect: onDetect,
               ),
             ),
             const SizedBox(height: 12),
@@ -354,14 +427,11 @@ class _ContinuousBarcodeScannerBottomSheetState
             ),
             const SizedBox(height: 10),
 
-            // ── 摄像头取景框 ────────────────────────────────────────
+            // ── 摄像头取景框（含手电筒按钮）──────────────────────────
             Expanded(
-              child: ClipRRect(
-                borderRadius: BorderRadius.circular(12),
-                child: MobileScanner(
-                  controller: widget.controller,
-                  onDetect: _onDetect,
-                ),
+              child: _buildCameraView(
+                controller: widget.controller,
+                onDetect: _onDetect,
               ),
             ),
             const SizedBox(height: 10),
@@ -413,8 +483,7 @@ class _ContinuousBarcodeScannerBottomSheetState
 
   Widget _buildStatusBanner(ColorScheme cs, _ScanEntry entry) {
     final isOk = entry.success;
-    final bannerColor =
-        isOk ? const Color(0xFF10B981) : cs.error;
+    final bannerColor = isOk ? const Color(0xFF10B981) : cs.error;
 
     return AnimatedContainer(
       key: ValueKey(entry.time),
@@ -429,9 +498,7 @@ class _ContinuousBarcodeScannerBottomSheetState
       child: Row(
         children: <Widget>[
           Icon(
-            isOk
-                ? Icons.check_circle_rounded
-                : Icons.error_outline_rounded,
+            isOk ? Icons.check_circle_rounded : Icons.error_outline_rounded,
             size: 16,
             color: bannerColor,
           ),
