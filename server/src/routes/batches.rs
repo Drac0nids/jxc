@@ -24,6 +24,7 @@ use crate::routes::common::{ensure_role, postgres_pool_or_none};
 pub struct CreateBatchRequest {
     pub product_id: i64,
     pub lot_number: Option<String>,
+    pub supplier: Option<String>,
     pub inbound_at: Option<NaiveDate>,
     pub produced_at: Option<NaiveDate>,
     pub expires_at: Option<NaiveDate>,
@@ -33,6 +34,7 @@ pub struct CreateBatchRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateBatchRequest {
     pub lot_number: Option<String>,
+    pub supplier: Option<String>,
     pub produced_at: Option<NaiveDate>,
     pub expires_at: Option<NaiveDate>,
     pub notes: Option<String>,
@@ -56,6 +58,7 @@ pub struct BatchData {
     pub id: i64,
     pub product_id: i64,
     pub lot_number: String,
+    pub supplier: Option<String>,
     pub inbound_at: String,
     pub produced_at: Option<String>,
     pub expires_at: Option<String>,
@@ -87,6 +90,7 @@ fn batch_to_data(b: ProductBatch) -> BatchData {
         id: b.id,
         product_id: b.product_id,
         lot_number: b.lot_number,
+        supplier: b.supplier,
         inbound_at: b.inbound_at.to_string(),
         produced_at: b.produced_at.map(|d| d.to_string()),
         expires_at: b.expires_at.map(|d| d.to_string()),
@@ -121,16 +125,27 @@ pub async fn create_batch(
 
     let pool = postgres_pool_or_none(&state);
     let today = chrono::Utc::now().date_naive();
-    let lot_number = req.lot_number
-        .filter(|s| !s.trim().is_empty())
-        .unwrap_or_else(|| format!("{}", today.format("%Y%m%d")));
     let inbound_at = req.inbound_at.unwrap_or(today);
+
+    // 若 lot_number 未填写，自动生成 YYYYMMDD-NN（NN 为同天同商品的序号，从 01 开始）
+    let lot_number = match req.lot_number.filter(|s| !s.trim().is_empty()) {
+        Some(v) => v,
+        None => {
+            // 查询今天该商品已有几个批次，序号 = count + 1
+            let date_prefix = inbound_at.format("%Y%m%d").to_string();
+            let existing: i64 = state.repository.count_batches_by_date(
+                pool, auth.tenant_id, req.product_id, inbound_at,
+            ).await.unwrap_or(0);
+            format!("{}-{:02}", date_prefix, existing + 1)
+        }
+    };
 
     let batch = state.repository.create_product_batch(
         pool,
         auth.tenant_id,
         req.product_id,
         lot_number,
+        req.supplier,
         inbound_at,
         req.produced_at,
         req.expires_at,
@@ -202,6 +217,7 @@ pub async fn update_batch(
         auth.tenant_id,
         id,
         req.lot_number,
+        req.supplier,
         req.produced_at,
         req.expires_at,
         req.notes,

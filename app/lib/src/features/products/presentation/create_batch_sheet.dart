@@ -44,6 +44,7 @@ class CreateBatchSheet extends StatefulWidget {
 class _CreateBatchSheetState extends State<CreateBatchSheet> {
   final _formKey = GlobalKey<FormState>();
   final _lotCtrl = TextEditingController();
+  final _supplierCtrl = TextEditingController();
   final _notesCtrl = TextEditingController();
 
   DateTime _inboundAt = DateTime.now();
@@ -55,6 +56,7 @@ class _CreateBatchSheetState extends State<CreateBatchSheet> {
   @override
   void dispose() {
     _lotCtrl.dispose();
+    _supplierCtrl.dispose();
     _notesCtrl.dispose();
     super.dispose();
   }
@@ -71,6 +73,7 @@ class _CreateBatchSheetState extends State<CreateBatchSheet> {
     final req = CreateBatchRequest(
       productId: widget.productId,
       lotNumber: _lotCtrl.text.trim().isEmpty ? null : _lotCtrl.text.trim(),
+      supplier: _supplierCtrl.text.trim().isEmpty ? null : _supplierCtrl.text.trim(),
       inboundAt: _inboundAt,
       producedAt: _producedAt,
       expiresAt: _hasExpiry ? _expiresAt : null,
@@ -187,13 +190,26 @@ class _CreateBatchSheetState extends State<CreateBatchSheet> {
                         ),
                       ),
 
-                    // 批次号（可选，默认今日日期）
+                    // 批次号（可选，默认自动生成 YYYYMMDD-NN）
                     TextFormField(
                       controller: _lotCtrl,
                       decoration: const InputDecoration(
                         labelText: '批次号（可选）',
-                        hintText: '留空则自动生成 YYYYMMDD',
+                        hintText: '留空则自动生成 YYYYMMDD-01',
                         prefixIcon: Icon(Icons.tag_rounded),
+                        border: OutlineInputBorder(),
+                        helperText: '同天同商品第2批自动变 -02，以此类推',
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // 供应商（可选）
+                    TextFormField(
+                      controller: _supplierCtrl,
+                      decoration: const InputDecoration(
+                        labelText: '供应商名称（可选）',
+                        hintText: '如：XX食品有限公司',
+                        prefixIcon: Icon(Icons.store_outlined),
                         border: OutlineInputBorder(),
                       ),
                     ),

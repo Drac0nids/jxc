@@ -76,6 +76,7 @@ pub struct ProductBatch {
     pub tenant_id: Uuid,
     pub product_id: i64,
     pub lot_number: String,
+    pub supplier: Option<String>,
     pub inbound_at: chrono::NaiveDate,
     pub produced_at: Option<chrono::NaiveDate>,
     pub expires_at: Option<chrono::NaiveDate>,

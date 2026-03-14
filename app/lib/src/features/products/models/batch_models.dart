@@ -15,6 +15,7 @@ class BatchData {
     required this.id,
     required this.productId,
     required this.lotNumber,
+    this.supplier,
     required this.inboundAt,
     this.producedAt,
     this.expiresAt,
@@ -29,6 +30,7 @@ class BatchData {
   final int id;
   final int productId;
   final String lotNumber;
+  final String? supplier;
   final DateTime inboundAt;
   final DateTime? producedAt;
   final DateTime? expiresAt;
@@ -55,6 +57,7 @@ class BatchData {
       id: json['id'] as int,
       productId: json['product_id'] as int,
       lotNumber: json['lot_number'] as String,
+      supplier: json['supplier'] as String?,
       inboundAt: DateTime.parse(json['inbound_at'] as String),
       producedAt: json['produced_at'] != null
           ? DateTime.parse(json['produced_at'] as String)
@@ -100,6 +103,7 @@ class CreateBatchRequest {
   const CreateBatchRequest({
     required this.productId,
     this.lotNumber,
+    this.supplier,
     this.inboundAt,
     this.producedAt,
     this.expiresAt,
@@ -108,6 +112,7 @@ class CreateBatchRequest {
 
   final int productId;
   final String? lotNumber;
+  final String? supplier;
   final DateTime? inboundAt;
   final DateTime? producedAt;
   final DateTime? expiresAt;
@@ -116,6 +121,7 @@ class CreateBatchRequest {
   Map<String, dynamic> toJson() => <String, dynamic>{
         'product_id': productId,
         if (lotNumber != null) 'lot_number': lotNumber,
+        if (supplier != null) 'supplier': supplier,
         if (inboundAt != null)
           'inbound_at': inboundAt!.toIso8601String().substring(0, 10),
         if (producedAt != null)
@@ -129,18 +135,21 @@ class CreateBatchRequest {
 class UpdateBatchRequest {
   const UpdateBatchRequest({
     this.lotNumber,
+    this.supplier,
     this.producedAt,
     this.expiresAt,
     this.notes,
   });
 
   final String? lotNumber;
+  final String? supplier;
   final DateTime? producedAt;
   final DateTime? expiresAt;
   final String? notes;
 
   Map<String, dynamic> toJson() => <String, dynamic>{
         if (lotNumber != null) 'lot_number': lotNumber,
+        'supplier': supplier,
         'produced_at': producedAt?.toIso8601String().substring(0, 10),
         'expires_at': expiresAt?.toIso8601String().substring(0, 10),
         if (notes != null) 'notes': notes,

@@ -846,6 +846,7 @@ impl RepositoryProvider {
         tenant_id: Uuid,
         product_id: i64,
         lot_number: String,
+        supplier: Option<String>,
         inbound_at: chrono::NaiveDate,
         produced_at: Option<chrono::NaiveDate>,
         expires_at: Option<chrono::NaiveDate>,
@@ -854,11 +855,26 @@ impl RepositoryProvider {
         match self {
             Self::Postgres(repo) => {
                 repo.create_product_batch(
-                    pool, tenant_id, product_id, lot_number, inbound_at,
+                    pool, tenant_id, product_id, lot_number, supplier, inbound_at,
                     produced_at, expires_at, notes,
                 ).await
             }
             Self::Memory(_) => Err(unsupported_operation("create_product_batch")),
+        }
+    }
+
+    pub async fn count_batches_by_date(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        product_id: i64,
+        date: chrono::NaiveDate,
+    ) -> Result<i64, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.count_batches_by_date(pool, tenant_id, product_id, date).await
+            }
+            Self::Memory(_) => Ok(0),
         }
     }
 
@@ -909,6 +925,7 @@ impl RepositoryProvider {
         tenant_id: Uuid,
         batch_id: i64,
         lot_number: Option<String>,
+        supplier: Option<String>,
         produced_at: Option<chrono::NaiveDate>,
         expires_at: Option<chrono::NaiveDate>,
         notes: Option<String>,
@@ -916,7 +933,7 @@ impl RepositoryProvider {
         match self {
             Self::Postgres(repo) => {
                 repo.update_product_batch(
-                    pool, tenant_id, batch_id, lot_number, produced_at, expires_at, notes,
+                    pool, tenant_id, batch_id, lot_number, supplier, produced_at, expires_at, notes,
                 ).await
             }
             Self::Memory(_) => Err(unsupported_operation("update_product_batch")),
@@ -5260,6 +5277,7 @@ impl PostgresRepository {
         tenant_id: Uuid,
         product_id: i64,
         lot_number: String,
+        supplier: Option<String>,
         inbound_at: chrono::NaiveDate,
         produced_at: Option<chrono::NaiveDate>,
         expires_at: Option<chrono::NaiveDate>,
@@ -5269,15 +5287,16 @@ impl PostgresRepository {
         let row = sqlx::query(
             r#"
             INSERT INTO product_batches
-                (tenant_id, product_id, lot_number, inbound_at, produced_at, expires_at, notes)
-            VALUES ($1, $2, $3, $4, $5, $6, $7)
-            RETURNING id, tenant_id, product_id, lot_number, inbound_at, produced_at,
+                (tenant_id, product_id, lot_number, supplier, inbound_at, produced_at, expires_at, notes)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+            RETURNING id, tenant_id, product_id, lot_number, supplier, inbound_at, produced_at,
                       expires_at, notes, is_sold_out, sold_out_at, created_at, updated_at
             "#,
         )
         .bind(tenant_id)
         .bind(product_id)
         .bind(&lot_number)
+        .bind(&supplier)
         .bind(inbound_at)
         .bind(produced_at)
         .bind(expires_at)
@@ -5286,6 +5305,29 @@ impl PostgresRepository {
         .await
         .map_err(|err| map_sqlx_error("创建批次失败", err))?;
         map_product_batch_row(&row)
+    }
+
+    pub async fn count_batches_by_date(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        product_id: i64,
+        date: chrono::NaiveDate,
+    ) -> Result<i64, AppError> {
+        let pool = require_pool(pool)?;
+        let count: i64 = sqlx::query_scalar(
+            r#"
+            SELECT COUNT(*) FROM product_batches
+            WHERE tenant_id = $1 AND product_id = $2 AND inbound_at = $3
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(product_id)
+        .bind(date)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| map_sqlx_error("统计批次数量失败", err))?;
+        Ok(count)
     }
 
     pub async fn list_product_batches(
@@ -5297,7 +5339,7 @@ impl PostgresRepository {
     ) -> Result<Vec<ProductBatch>, AppError> {
         let pool = require_pool(pool)?;
         let mut sql = String::from(
-            r#"SELECT id, tenant_id, product_id, lot_number, inbound_at, produced_at,
+            r#"SELECT id, tenant_id, product_id, lot_number, supplier, inbound_at, produced_at,
                       expires_at, notes, is_sold_out, sold_out_at, created_at, updated_at
                FROM product_batches
                WHERE tenant_id = $1
@@ -5335,11 +5377,10 @@ impl PostgresRepository {
         within_days: i32,
     ) -> Result<Vec<ProductBatchWithProduct>, AppError> {
         let pool = require_pool(pool)?;
-        // 返回即将过期（含已过期）且未售完的批次，连带商品名称
         let rows = sqlx::query(
             r#"
             SELECT
-                pb.id, pb.tenant_id, pb.product_id, pb.lot_number, pb.inbound_at,
+                pb.id, pb.tenant_id, pb.product_id, pb.lot_number, pb.supplier, pb.inbound_at,
                 pb.produced_at, pb.expires_at, pb.notes, pb.is_sold_out, pb.sold_out_at,
                 pb.created_at, pb.updated_at,
                 p.name AS product_name, p.sku AS product_sku
@@ -5380,7 +5421,7 @@ impl PostgresRepository {
             UPDATE product_batches
             SET is_sold_out = TRUE, sold_out_at = NOW(), updated_at = NOW()
             WHERE id = $1 AND tenant_id = $2
-            RETURNING id, tenant_id, product_id, lot_number, inbound_at, produced_at,
+            RETURNING id, tenant_id, product_id, lot_number, supplier, inbound_at, produced_at,
                       expires_at, notes, is_sold_out, sold_out_at, created_at, updated_at
             "#,
         )
@@ -5400,6 +5441,7 @@ impl PostgresRepository {
         tenant_id: Uuid,
         batch_id: i64,
         lot_number: Option<String>,
+        supplier: Option<String>,
         produced_at: Option<chrono::NaiveDate>,
         expires_at: Option<chrono::NaiveDate>,
         notes: Option<String>,
@@ -5410,18 +5452,20 @@ impl PostgresRepository {
             UPDATE product_batches
             SET
                 lot_number  = COALESCE($3, lot_number),
-                produced_at = $4,
-                expires_at  = $5,
-                notes       = $6,
+                supplier    = $4,
+                produced_at = $5,
+                expires_at  = $6,
+                notes       = $7,
                 updated_at  = NOW()
             WHERE id = $1 AND tenant_id = $2
-            RETURNING id, tenant_id, product_id, lot_number, inbound_at, produced_at,
+            RETURNING id, tenant_id, product_id, lot_number, supplier, inbound_at, produced_at,
                       expires_at, notes, is_sold_out, sold_out_at, created_at, updated_at
             "#,
         )
         .bind(batch_id)
         .bind(tenant_id)
         .bind(&lot_number)
+        .bind(&supplier)
         .bind(produced_at)
         .bind(expires_at)
         .bind(&notes)
@@ -5473,6 +5517,7 @@ fn map_product_batch_row(row: &sqlx::postgres::PgRow) -> Result<ProductBatch, Ap
         tenant_id: row.try_get("tenant_id").map_err(|e| map_sqlx_error("读取批次tenant_id失败", e))?,
         product_id: row.try_get("product_id").map_err(|e| map_sqlx_error("读取批次product_id失败", e))?,
         lot_number: row.try_get("lot_number").map_err(|e| map_sqlx_error("读取批次号失败", e))?,
+        supplier: row.try_get("supplier").map_err(|e| map_sqlx_error("读取供应商失败", e))?,
         inbound_at: row.try_get("inbound_at").map_err(|e| map_sqlx_error("读取入库日期失败", e))?,
         produced_at: row.try_get("produced_at").map_err(|e| map_sqlx_error("读取生产日期失败", e))?,
         expires_at: row.try_get("expires_at").map_err(|e| map_sqlx_error("读取过期日期失败", e))?,
