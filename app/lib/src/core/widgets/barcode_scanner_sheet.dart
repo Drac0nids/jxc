@@ -72,7 +72,10 @@ class BarcodeScannerSheet {
     required FutureOr<String?> Function(String barcode) onScanned,
   }) async {
     final MobileScannerController cameraController = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
+      // 连续扫码必须用 normal，noDuplicates 会在扫到一个码后暂停检测
+      // 直到该条码离开取景框，导致用户需要手动触屏才能继续扫下一个。
+      // 去重由内部 deduplicateWindowMs 时间窗口负责。
+      detectionSpeed: DetectionSpeed.normal,
       formats: _supportedFormats,
     );
 
