@@ -7,16 +7,17 @@ use axum::{
 use serde_json::json;
 use uuid::Uuid;
 
+use crate::routes::common::{
+    CreateUserRequest, ResetUserPasswordRequest, UpdateUserRoleRequest, ensure_role,
+    parse_required_text, parse_user_role_input, postgres_pool_or_none, to_user_data,
+};
 use crate::{
     error::AppError,
-    middleware::{AuthContext},
+    extractors::AppJson,
+    middleware::AuthContext,
     models::{User, hash_password},
     response::{ApiResponse, build_response_headers, resolve_request_id},
     state::AppState,
-};
-use crate::routes::common::{
-    postgres_pool_or_none, ensure_role, parse_required_text, parse_user_role_input, to_user_data,
-    CreateUserRequest, ResetUserPasswordRequest, UpdateUserRoleRequest
 };
 
 pub async fn list_users(
@@ -69,7 +70,7 @@ pub async fn create_user(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
-    Json(req): Json<CreateUserRequest>,
+    AppJson(req): AppJson<CreateUserRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER"], &request_id)?;
@@ -124,7 +125,7 @@ pub async fn update_user_role(
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Json(req): Json<UpdateUserRoleRequest>,
+    AppJson(req): AppJson<UpdateUserRoleRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER"], &request_id)?;
@@ -132,6 +133,13 @@ pub async fn update_user_role(
     let user_id = Uuid::parse_str(id.trim())
         .map_err(|_| AppError::bad_request("id 格式错误，必须为 UUID"))
         .map_err(|err| err.with_request_id(request_id.clone()))?;
+
+    // 禁止修改自己的角色，防止管理员意外降权
+    if auth.user_id == user_id {
+        return Err(AppError::forbidden("不能修改自己的角色")
+            .with_request_id(request_id));
+    }
+
     let new_role = parse_user_role_input(&req.role, &request_id)?;
 
     let updated_user = if state.repository.is_postgres() {
@@ -180,7 +188,7 @@ pub async fn reset_user_password(
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Path(id): Path<String>,
-    Json(req): Json<ResetUserPasswordRequest>,
+    AppJson(req): AppJson<ResetUserPasswordRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER"], &request_id)?;

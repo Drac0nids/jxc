@@ -27,8 +27,13 @@ class _RoleOption {
 // ════════════════════════════════════════════════════════════════════════════
 
 class UsersPage extends StatefulWidget {
-  const UsersPage({super.key, required this.controller});
+  const UsersPage({
+    super.key,
+    required this.controller,
+    required this.currentUserId,
+  });
   final UsersController controller;
+  final String currentUserId;
 
   @override
   State<UsersPage> createState() => _UsersPageState();
@@ -141,6 +146,7 @@ class _UsersPageState extends State<UsersPage> {
                   ...ctrl.list.map(
                     (UserData u) => _UserCard(
                       user: u,
+                      isSelf: u.id == widget.currentUserId,
                       onRoleTap: () => _showRoleDialog(u),
                       onPwdTap: () => _showResetPwdDialog(u),
                     ),
@@ -282,11 +288,13 @@ class _RoleLegend extends StatelessWidget {
 class _UserCard extends StatelessWidget {
   const _UserCard({
     required this.user,
+    required this.isSelf,
     required this.onRoleTap,
     required this.onPwdTap,
   });
 
   final UserData user;
+  final bool isSelf;
   final VoidCallback onRoleTap;
   final VoidCallback onPwdTap;
 
@@ -326,9 +334,29 @@ class _UserCard extends StatelessWidget {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
-                  Text(user.name,
-                      style: const TextStyle(
-                          fontWeight: FontWeight.w700, fontSize: 15)),
+                  Row(
+                    children: <Widget>[
+                      Text(user.name,
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w700, fontSize: 15)),
+                      if (isSelf) ...<Widget>[
+                        const SizedBox(width: 6),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: Colors.blue.withValues(alpha: 0.12),
+                            borderRadius: BorderRadius.circular(4),
+                          ),
+                          child: const Text('你',
+                              style: TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.blue,
+                                  fontWeight: FontWeight.w700)),
+                        ),
+                      ],
+                    ],
+                  ),
                   const SizedBox(height: 2),
                   Text('@${user.username}',
                       style: TextStyle(
@@ -344,16 +372,17 @@ class _UserCard extends StatelessWidget {
               icon: const Icon(Icons.more_vert, size: 20),
               tooltip: '操作',
               itemBuilder: (_) => <PopupMenuEntry<String>>[
-                const PopupMenuItem<String>(
-                  value: 'role',
-                  child: Row(
-                    children: <Widget>[
-                      Icon(Icons.badge_rounded, size: 18),
-                      SizedBox(width: 8),
-                      Text('修改角色'),
-                    ],
+                if (!isSelf)
+                  const PopupMenuItem<String>(
+                    value: 'role',
+                    child: Row(
+                      children: <Widget>[
+                        Icon(Icons.badge_rounded, size: 18),
+                        SizedBox(width: 8),
+                        Text('修改角色'),
+                      ],
+                    ),
                   ),
-                ),
                 const PopupMenuItem<String>(
                   value: 'pwd',
                   child: Row(

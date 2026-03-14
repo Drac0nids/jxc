@@ -253,8 +253,12 @@ class _DashboardPageState extends State<DashboardPage> {
               ProductsPage(controller: widget.productController),
         ));
       case _QuickActionType.users:
+        final selfId = widget.sessionController.session?.user.id ?? '';
         Navigator.of(context).push(MaterialPageRoute<void>(
-          builder: (_) => UsersPage(controller: widget.usersController),
+          builder: (_) => UsersPage(
+            controller: widget.usersController,
+            currentUserId: selfId,
+          ),
         ));
     }
   }
