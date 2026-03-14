@@ -679,9 +679,7 @@ class _InboundPageState extends State<InboundPage> {
       title: '入库连续扫码',
       hint: '摄像头持续开启，识别到条码后自动加入入库明细，完成后点击“结束扫码”。',
       onScanned: (String barcode) async {
-        if (!mounted) {
-          return false;
-        }
+        if (!mounted) return null;
 
         _scanBarcodeController.text = barcode;
         final InboundScanResult? result =
@@ -691,9 +689,7 @@ class _InboundPageState extends State<InboundPage> {
           currentBarcode: _barcodeController.text,
           currentQty: _qtyController.text,
         );
-        if (!mounted || result == null) {
-          return false;
-        }
+        if (!mounted || result == null) return null;
 
         _upsertDraftItem(
           productId: result.productIdText,
@@ -709,7 +705,9 @@ class _InboundPageState extends State<InboundPage> {
           _continuousProcessedCount += 1;
         });
         SystemSound.play(SystemSoundType.click);
-        return true;
+        // 返回显示标签供弹窗历史记录展示
+        final int qty = int.tryParse(result.qtyText) ?? 1;
+        return '${result.productName}  x$qty';
       },
     );
 

@@ -723,25 +723,26 @@ class _OutboundPageState extends State<OutboundPage> {
       title: '出库连续扫码',
       hint: '摄像头持续开启，识别到条码后自动累加，完成后点击“结束扫码”。',
       onScanned: (String barcode) async {
-        if (!mounted) {
-          return false;
-        }
+        if (!mounted) return null;
         _scanBarcodeController.text = barcode;
         final result = await widget.controller.scanAndAccumulate(
           barcode: barcode,
           customSellPrice: _scanSellPriceController.text,
           items: _collectItemInputs(),
         );
-        if (!mounted || result == null) {
-          return false;
-        }
+        if (!mounted || result == null) return null;
 
         setState(() {
           _continuousProcessedCount += 1;
         });
         _replaceItems(result.items);
         SystemSound.play(SystemSoundType.click);
-        return true;
+        // 返回显示标签供弹窗历史记录展示
+        final matched = result.items.firstWhere(
+          (i) => i.productId.isNotEmpty,
+          orElse: () => result.items.first,
+        );
+        return matched.productName.isNotEmpty ? matched.productName : barcode;
       },
     );
 

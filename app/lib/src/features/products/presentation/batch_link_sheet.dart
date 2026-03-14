@@ -82,24 +82,16 @@ class _BatchLinkSheetState extends State<BatchLinkSheet>
       _loadingBatches = true;
       _loadError = null;
     });
-    try {
-      final list = await widget.controller.repository.listBatches(
-        productId: widget.productId,
-        onlyActive: true,
-      );
-      if (mounted) {
-        setState(() {
-          _batches = list;
-          _loadingBatches = false;
-        });
-      }
-    } catch (e) {
-      if (mounted) {
-        setState(() {
-          _loadError = '加载批次失败，请下拉重试';
-          _loadingBatches = false;
-        });
-      }
+    await widget.controller.loadBatchesForProduct(
+      widget.productId,
+      onlyActive: true,
+    );
+    if (mounted) {
+      setState(() {
+        _batches = widget.controller.batches;
+        _loadingBatches = false;
+        _loadError = widget.controller.errorMessage;
+      });
     }
   }
 
