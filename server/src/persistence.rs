@@ -77,6 +77,30 @@ async fn apply_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
             "0003_business_tables",
             include_str!("../migrations/0003_business_tables.sql"),
         ),
+        (
+            "0004_barcode_lookup_cache",
+            include_str!("../migrations/0004_barcode_lookup_cache.sql"),
+        ),
+        (
+            "0005_stock_logs_snapshot_sell_price",
+            include_str!("../migrations/0005_stock_logs_snapshot_sell_price.sql"),
+        ),
+        (
+            "0006_order_item_product_name_snapshot",
+            include_str!("../migrations/0006_order_item_product_name_snapshot.sql"),
+        ),
+        (
+            "0007_stock_logs_snapshot_inbound_unit_cost",
+            include_str!("../migrations/0007_stock_logs_snapshot_inbound_unit_cost.sql"),
+        ),
+        (
+            "0008_products_last_inbound_unit_cost_drop_wholesale_price",
+            include_str!("../migrations/0008_products_last_inbound_unit_cost_drop_wholesale_price.sql"),
+        ),
+        (
+            "0009_tenants_tenant_code_login",
+            include_str!("../migrations/0009_tenants_tenant_code_login.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {
