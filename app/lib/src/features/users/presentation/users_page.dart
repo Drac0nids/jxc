@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../../core/widgets/brand_ui.dart';
 import '../application/users_controller.dart';
@@ -358,9 +359,33 @@ class _UserCard extends StatelessWidget {
                     ],
                   ),
                   const SizedBox(height: 2),
-                  Text('@${user.username}',
-                      style: TextStyle(
-                          fontSize: 12, color: cs.onSurfaceVariant)),
+                  GestureDetector(
+                    onTap: () {
+                      Clipboard.setData(
+                          ClipboardData(text: user.username));
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(
+                              '已复制用户名：${user.username}'),
+                          duration: const Duration(seconds: 2),
+                        ),
+                      );
+                    },
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: <Widget>[
+                        Text('@${user.username}',
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: cs.onSurfaceVariant)),
+                        const SizedBox(width: 3),
+                        Icon(Icons.copy_rounded,
+                            size: 12,
+                            color:
+                                cs.onSurfaceVariant.withValues(alpha: 0.5)),
+                      ],
+                    ),
+                  ),
                 ],
               ),
             ),
