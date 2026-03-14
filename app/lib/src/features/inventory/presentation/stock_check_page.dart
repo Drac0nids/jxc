@@ -347,10 +347,17 @@ class _StockCheckPageState extends State<StockCheckPage> {
         ...confirmItems.map((item) {
           final ctrl = _confirmActualControllers[item.productId];
           if (ctrl == null) return const SizedBox.shrink();
+          // 从 result.items 中查商品名称
+          final productName = result?.items
+              .where((i) => i.productId == item.productId)
+              .firstOrNull
+              ?.productName ??
+              '商品 #${item.productId}';
           return Padding(
             padding: const EdgeInsets.only(bottom: 8),
             child: _ConfirmItemRow(
               item: item,
+              productName: productName,
               controller: ctrl,
               enabled: canAct,
             ),
@@ -772,7 +779,7 @@ class _ConfirmedResultPanel extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: <Widget>[
                       Text(
-                        '商品 #${item.productId}',
+                        item.productName,
                         style: const TextStyle(
                             fontWeight: FontWeight.w600, fontSize: 13),
                       ),
@@ -948,11 +955,13 @@ class _ItemInputRow extends StatelessWidget {
 class _ConfirmItemRow extends StatelessWidget {
   const _ConfirmItemRow({
     required this.item,
+    required this.productName,
     required this.controller,
     required this.enabled,
   });
 
   final StockCheckConfirmItemInput item;
+  final String productName;
   final TextEditingController controller;
   final bool enabled;
 
@@ -974,7 +983,7 @@ class _ConfirmItemRow extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
                 Text(
-                  '商品 #${item.productId}',
+                  productName,
                   style: const TextStyle(
                       fontWeight: FontWeight.w600, fontSize: 13),
                 ),

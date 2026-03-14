@@ -368,6 +368,7 @@ pub struct StockCheckConfirmRequest {
 #[derive(Debug, Serialize)]
 pub struct StockCheckItemData {
     pub product_id: i64,
+    pub product_name: String,
     pub book_stock: i32,
     pub actual_stock: Option<i32>,
     pub delta_qty: Option<i32>,
@@ -657,7 +658,10 @@ pub fn sales_order_snapshot(order: &SalesOrder) -> Value {
     })
 }
 
-pub fn to_stock_check_data(check: &StockCheck) -> StockCheckData {
+pub fn to_stock_check_data(
+    check: &StockCheck,
+    product_name_map: &HashMap<i64, String>,
+) -> StockCheckData {
     StockCheckData {
         id: check.id,
         biz_no: check.biz_no.clone(),
@@ -667,6 +671,10 @@ pub fn to_stock_check_data(check: &StockCheck) -> StockCheckData {
             .iter()
             .map(|i| StockCheckItemData {
                 product_id: i.product_id,
+                product_name: product_name_map
+                    .get(&i.product_id)
+                    .cloned()
+                    .unwrap_or_else(|| format!("商品#{}", i.product_id)),
                 book_stock: i.book_stock,
                 actual_stock: i.actual_stock,
                 delta_qty: i.delta_qty,
@@ -679,6 +687,16 @@ pub fn to_stock_check_data(check: &StockCheck) -> StockCheckData {
         created_at: check.created_at.clone(),
         updated_at: check.updated_at.clone(),
     }
+}
+
+pub async fn to_stock_check_data_with_names(
+    state: &AppState,
+    tenant_id: Uuid,
+    request_id: &str,
+    check: &StockCheck,
+) -> Result<StockCheckData, AppError> {
+    let product_name_map = load_product_name_map(state, tenant_id, request_id).await?;
+    Ok(to_stock_check_data(check, &product_name_map))
 }
 
 pub fn stock_check_snapshot(check: &StockCheck) -> Value {

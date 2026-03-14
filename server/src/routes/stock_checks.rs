@@ -4,29 +4,31 @@ use axum::{
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
 };
+use chrono::Utc;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
-use chrono::{Utc};
 
+use crate::routes::common::{
+    StockCheckConfirmRequest, StockCheckCreateRequest, append_audit_log, ensure_role,
+    generate_server_biz_no, postgres_pool_or_none, product_snapshot,
+    require_idempotency_key, save_idempotency_record, save_idempotency_record_sync,
+    stock_check_snapshot, to_stock_check_data, to_stock_check_data_with_names,
+    try_idempotent_replay,
+};
 use crate::{
     error::AppError,
-    middleware::{AuthContext},
+    extractors::AppJson,
+    middleware::AuthContext,
     models::{StockCheck, StockCheckItem, StockCheckStatus, StockLog},
     response::{ApiResponse, build_response_headers, resolve_request_id},
     state::AppState,
-};
-use crate::routes::common::{
-    postgres_pool_or_none, ensure_role, parse_required_text,
-    require_idempotency_key, try_idempotent_replay, save_idempotency_record, save_idempotency_record_sync,
-    to_stock_check_data, stock_check_snapshot, append_audit_log, product_snapshot,
-    StockCheckCreateRequest, StockCheckConfirmRequest
 };
 
 pub async fn create_stock_check(
     State(state): State<AppState>,
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
-    Json(req): Json<StockCheckCreateRequest>,
+    AppJson(req): AppJson<StockCheckCreateRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
@@ -45,7 +47,6 @@ pub async fn create_stock_check(
         return Ok(replayed);
     }
 
-    let biz_no = parse_required_text(&req.biz_no, "biz_no", &request_id)?;
     if req.items.is_empty() {
         return Err(AppError::bad_request("items 不能为空").with_request_id(request_id));
     }
@@ -83,56 +84,72 @@ pub async fn create_stock_check(
             });
         }
 
-        if state
-            .repository
-            .is_stock_check_biz_no_taken(pool, auth.tenant_id, &biz_no)
-            .await
-            .map_err(|err| err.with_request_id(request_id.clone()))?
-        {
-            return Err(AppError::conflict(4090, "盘点单号已存在")
-                .with_data(json!({ "biz_no": biz_no }))
-                .with_request_id(request_id));
-        }
-
         let id = state
             .repository
-            .next_stock_check_id(pool).await
+            .next_stock_check_id(pool)
+            .await
             .map_err(|err| err.with_request_id(request_id.clone()))?;
         let now = Utc::now().to_rfc3339();
 
-        let check = StockCheck {
-            id,
-            tenant_id: auth.tenant_id,
-            biz_no,
-            status: StockCheckStatus::Draft,
-            items,
-            remark: req.remark,
-            created_by: auth.user_id,
-            version: 1,
-            counting_at: None,
-            confirmed_at: None,
-            created_at: now.clone(),
-            updated_at: now,
-        };
+        for _ in 0..8 {
+            let biz_no = generate_server_biz_no("SC");
+            if state
+                .repository
+                .is_stock_check_biz_no_taken(pool, auth.tenant_id, &biz_no)
+                .await
+                .map_err(|err| err.with_request_id(request_id.clone()))?
+            {
+                continue;
+            }
 
-        state
-            .repository
-            .create_stock_check(pool, &check)
-            .await
-            .map_err(|err| err.with_request_id(request_id.clone()))?;
+            let check = StockCheck {
+                id,
+                tenant_id: auth.tenant_id,
+                biz_no,
+                status: StockCheckStatus::Draft,
+                items: items.clone(),
+                remark: req.remark.clone(),
+                created_by: auth.user_id,
+                version: 1,
+                counting_at: None,
+                confirmed_at: None,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            };
 
-        let body = ApiResponse::success(to_stock_check_data(&check), request_id.clone());
-        let response_body = serde_json::to_value(&body).map_err(|_| {
-            AppError::internal("盘点单创建响应序列化失败").with_request_id(request_id.clone())
-        })?;
-        save_idempotency_record(&state, &scope_key, request_payload, response_body).await?;
+            match state.repository.create_stock_check(pool, &check).await {
+                Ok(_) => {
+                    let data = to_stock_check_data_with_names(
+                        &state, auth.tenant_id, &request_id, &check,
+                    )
+                    .await
+                    .map_err(|err| err.with_request_id(request_id.clone()))?;
+                    let body = ApiResponse::success(data, request_id.clone());
+                    let response_body = serde_json::to_value(&body).map_err(|_| {
+                        AppError::internal("盘点单创建响应序列化失败")
+                            .with_request_id(request_id.clone())
+                    })?;
+                    save_idempotency_record(&state, &scope_key, request_payload, response_body)
+                        .await?;
 
-        return Ok((
-            StatusCode::OK,
-            build_response_headers(&request_id, false),
-            Json(body),
-        )
-            .into_response());
+                    return Ok((
+                        StatusCode::OK,
+                        build_response_headers(&request_id, false),
+                        Json(body),
+                    )
+                    .into_response());
+                }
+                Err(err) => {
+                    let err = err.with_request_id(request_id.clone());
+                    if err.status == StatusCode::CONFLICT && err.code == 4090 {
+                        continue;
+                    }
+                    return Err(err);
+                }
+            }
+        }
+
+        return Err(AppError::internal("盘点单号生成失败，请稍后重试").with_request_id(request_id));
     }
 
     let mut items = Vec::with_capacity(req.items.len());
@@ -167,6 +184,27 @@ pub async fn create_stock_check(
     let id = *next_id;
     drop(next_id);
 
+    let mut checks = state
+        .stock_checks
+        .lock()
+        .map_err(|_| AppError::internal("盘点单状态锁异常").with_request_id(request_id.clone()))?;
+
+    let mut selected_biz_no = None;
+    for _ in 0..8 {
+        let candidate = generate_server_biz_no("SC");
+        let taken = checks
+            .values()
+            .any(|c| c.tenant_id == auth.tenant_id && c.biz_no == candidate);
+        if !taken {
+            selected_biz_no = Some(candidate);
+            break;
+        }
+    }
+
+    let biz_no = selected_biz_no.ok_or_else(|| {
+        AppError::internal("盘点单号生成失败，请稍后重试").with_request_id(request_id.clone())
+    })?;
+
     let check = StockCheck {
         id,
         tenant_id: auth.tenant_id,
@@ -182,24 +220,24 @@ pub async fn create_stock_check(
         updated_at: now,
     };
 
-    let mut checks = state
-        .stock_checks
-        .lock()
-        .map_err(|_| AppError::internal("盘点单状态锁异常").with_request_id(request_id.clone()))?;
-
-    if checks
-        .values()
-        .any(|c| c.tenant_id == auth.tenant_id && c.biz_no == check.biz_no)
-    {
-        return Err(AppError::conflict(4090, "盘点单号已存在")
-            .with_data(json!({ "biz_no": check.biz_no }))
-            .with_request_id(request_id));
-    }
-
     checks.insert(check.id, check.clone());
     drop(checks);
 
-    let body = ApiResponse::success(to_stock_check_data(&check), request_id.clone());
+    // 内存模式同步构建商品名称映射（避免将 MutexGuard 跨越 await 点）
+    let product_name_map: HashMap<i64, String> = {
+        let products = state.products.lock().map_err(|_| {
+            AppError::internal("商品状态锁异常").with_request_id(request_id.clone())
+        })?;
+        products
+            .values()
+            .filter(|p| p.tenant_id == auth.tenant_id)
+            .map(|p| (p.id, p.name.clone()))
+            .collect()
+    };
+    let body = ApiResponse::success(
+        to_stock_check_data(&check, &product_name_map),
+        request_id.clone(),
+    );
     let response_body = serde_json::to_value(&body).map_err(|_| {
         AppError::internal("盘点单创建响应序列化失败").with_request_id(request_id.clone())
     })?;
@@ -210,7 +248,7 @@ pub async fn create_stock_check(
         build_response_headers(&request_id, false),
         Json(body),
     )
-        .into_response())
+    .into_response())
 }
 
 pub async fn get_stock_check(
@@ -244,13 +282,18 @@ pub async fn get_stock_check(
         check.clone()
     };
 
-    let body = ApiResponse::success(to_stock_check_data(&check), request_id.clone());
+    let body = ApiResponse::success(
+        to_stock_check_data_with_names(&state, auth.tenant_id, &request_id, &check)
+            .await
+            .map_err(|err| err.with_request_id(request_id.clone()))?,
+        request_id.clone(),
+    );
     Ok((
         StatusCode::OK,
         build_response_headers(&request_id, false),
         Json(body),
     )
-        .into_response())
+    .into_response())
 }
 
 pub async fn start_stock_check(
@@ -258,7 +301,7 @@ pub async fn start_stock_check(
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Path(id): Path<i64>,
-    Json(req): Json<crate::routes::common::OrderActionRequest>,
+    AppJson(req): AppJson<crate::routes::common::OrderActionRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
@@ -291,7 +334,12 @@ pub async fn start_stock_check(
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?;
 
-        let body = ApiResponse::success(to_stock_check_data(&updated), request_id.clone());
+        let data = to_stock_check_data_with_names(
+            &state, auth.tenant_id, &request_id, &updated,
+        )
+        .await
+        .map_err(|err| err.with_request_id(request_id.clone()))?;
+        let body = ApiResponse::success(data, request_id.clone());
         let response_body = serde_json::to_value(&body).map_err(|_| {
             AppError::internal("盘点单开始响应序列化失败").with_request_id(request_id.clone())
         })?;
@@ -302,7 +350,7 @@ pub async fn start_stock_check(
             build_response_headers(&request_id, false),
             Json(body),
         )
-            .into_response());
+        .into_response());
     }
 
     let existing = {
@@ -378,7 +426,10 @@ pub async fn start_stock_check(
         &request_id,
     )?;
 
-    let body = ApiResponse::success(to_stock_check_data(&updated), request_id.clone());
+    let data = to_stock_check_data_with_names(&state, auth.tenant_id, &request_id, &updated)
+        .await
+        .map_err(|err| err.with_request_id(request_id.clone()))?;
+    let body = ApiResponse::success(data, request_id.clone());
     let response_body = serde_json::to_value(&body).map_err(|_| {
         AppError::internal("盘点单开始响应序列化失败").with_request_id(request_id.clone())
     })?;
@@ -389,7 +440,7 @@ pub async fn start_stock_check(
         build_response_headers(&request_id, false),
         Json(body),
     )
-        .into_response())
+    .into_response())
 }
 
 pub async fn confirm_stock_check(
@@ -397,7 +448,7 @@ pub async fn confirm_stock_check(
     Extension(auth): Extension<AuthContext>,
     headers: HeaderMap,
     Path(id): Path<i64>,
-    Json(req): Json<StockCheckConfirmRequest>,
+    AppJson(req): AppJson<StockCheckConfirmRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
@@ -442,7 +493,12 @@ pub async fn confirm_stock_check(
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?;
 
-        let body = ApiResponse::success(to_stock_check_data(&updated), request_id.clone());
+        let data = to_stock_check_data_with_names(
+            &state, auth.tenant_id, &request_id, &updated,
+        )
+        .await
+        .map_err(|err| err.with_request_id(request_id.clone()))?;
+        let body = ApiResponse::success(data, request_id.clone());
         let response_body = serde_json::to_value(&body).map_err(|_| {
             AppError::internal("盘点单确认响应序列化失败").with_request_id(request_id.clone())
         })?;
@@ -453,7 +509,7 @@ pub async fn confirm_stock_check(
             build_response_headers(&request_id, false),
             Json(body),
         )
-            .into_response());
+        .into_response());
     }
 
     let mut actual_map: HashMap<i64, i32> = HashMap::new();
@@ -576,6 +632,8 @@ pub async fn confirm_stock_check(
                     delta,
                     product.current_stock,
                     product.cost_price,
+                    None,
+                    None,
                     auth.user_id,
                 ));
                 next_log_id += 1;
@@ -635,7 +693,10 @@ pub async fn confirm_stock_check(
         &request_id,
     )?;
 
-    let body = ApiResponse::success(to_stock_check_data(&updated), request_id.clone());
+    let data = to_stock_check_data_with_names(&state, auth.tenant_id, &request_id, &updated)
+        .await
+        .map_err(|err| err.with_request_id(request_id.clone()))?;
+    let body = ApiResponse::success(data, request_id.clone());
     let response_body = serde_json::to_value(&body).map_err(|_| {
         AppError::internal("盘点单确认响应序列化失败").with_request_id(request_id.clone())
     })?;
@@ -646,5 +707,5 @@ pub async fn confirm_stock_check(
         build_response_headers(&request_id, false),
         Json(body),
     )
-        .into_response())
+    .into_response())
 }

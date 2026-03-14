@@ -355,19 +355,25 @@ class StockCheckConfirmRequest {
 class StockCheckItemData {
   const StockCheckItemData({
     required this.productId,
+    required this.productName,
     required this.bookStock,
     this.actualStock,
     this.deltaQty,
   });
 
   final int productId;
+  final String productName;
   final int bookStock;
   final int? actualStock;
   final int? deltaQty;
 
   factory StockCheckItemData.fromJson(Map<String, dynamic> json) {
+    final id = _toInt(json['product_id']);
     return StockCheckItemData(
-      productId: _toInt(json['product_id']),
+      productId: id,
+      productName: (json['product_name'] as String?)?.isNotEmpty == true
+          ? json['product_name'] as String
+          : '商品#$id',
       bookStock: _toInt(json['book_stock']),
       actualStock: _toNullableInt(json['actual_stock']),
       deltaQty: _toNullableInt(json['delta_qty']),
