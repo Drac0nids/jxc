@@ -818,10 +818,11 @@ class _DashboardPageState extends State<DashboardPage>
                         ),
                       )
                     else ...<Widget>[
-                      // ── 出库 / 入库（模式切换卡）──────────────
+                      // ── 出入库（普通 + 序列号）──────────────────
                       if (canOutbound || canInbound) ...<Widget>[
                         const _SectionTitle(label: '出入库'),
                         const SizedBox(height: 8),
+                        // 普通出库 / 入库（含模式切换）
                         GridView.count(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
@@ -855,6 +856,44 @@ class _DashboardPageState extends State<DashboardPage>
                                     : _navigateWithScan(
                                         _QuickActionType.inbound,
                                         _ScanModeEntry.scanConfirm),
+                              ),
+                          ],
+                        ),
+                        const SizedBox(height: 10),
+                        // 序列号出库 / 入库（小卡片，挂靠在同一区域）
+                        GridView.count(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 2.2,
+                          children: <Widget>[
+                            if (canOutbound)
+                              _QuickActionCard(
+                                item: const _QuickActionItem(
+                                  type: _QuickActionType.serialOutbound,
+                                  title: 'SN 出库',
+                                  subtitle: '扫序列号直接出库',
+                                  icon: Icons.document_scanner_rounded,
+                                  color: Color(0xFFEC4899),
+                                  enabled: true,
+                                ),
+                                onTap: () => _handleQuickActionTap(
+                                    _QuickActionType.serialOutbound),
+                              ),
+                            if (canInbound)
+                              _QuickActionCard(
+                                item: const _QuickActionItem(
+                                  type: _QuickActionType.serialInbound,
+                                  title: 'SN 入库',
+                                  subtitle: '逐台扫码绑定商品',
+                                  icon: Icons.qr_code_2_rounded,
+                                  color: Color(0xFF0EA5E9),
+                                  enabled: true,
+                                ),
+                                onTap: () => _handleQuickActionTap(
+                                    _QuickActionType.serialInbound),
                               ),
                           ],
                         ),
@@ -898,49 +937,6 @@ class _DashboardPageState extends State<DashboardPage>
                                 ),
                                 onTap: () => _handleQuickActionTap(
                                     _QuickActionType.products),
-                              ),
-                          ],
-                        ),
-                      ],
-
-                      // ── 序列号管理 ──────────────────────────────────
-                      if (canInbound || canOutbound) ...<Widget>[
-                        const SizedBox(height: 12),
-                        const _SectionTitle(label: '序列号管理'),
-                        const SizedBox(height: 8),
-                        GridView.count(
-                          shrinkWrap: true,
-                          physics: const NeverScrollableScrollPhysics(),
-                          crossAxisCount: 2,
-                          mainAxisSpacing: 10,
-                          crossAxisSpacing: 10,
-                          childAspectRatio: 1.9,
-                          children: <Widget>[
-                            if (canInbound)
-                              _QuickActionCard(
-                                item: const _QuickActionItem(
-                                  type: _QuickActionType.serialInbound,
-                                  title: '序列号入库',
-                                  subtitle: '手机/设备逐台录入',
-                                  icon: Icons.qr_code_2_rounded,
-                                  color: Color(0xFF0EA5E9),
-                                  enabled: true,
-                                ),
-                                onTap: () => _handleQuickActionTap(
-                                    _QuickActionType.serialInbound),
-                              ),
-                            if (canOutbound)
-                              _QuickActionCard(
-                                item: const _QuickActionItem(
-                                  type: _QuickActionType.serialOutbound,
-                                  title: '序列号出库',
-                                  subtitle: '扫 SN 自动识别出库',
-                                  icon: Icons.document_scanner_rounded,
-                                  color: Color(0xFFEC4899),
-                                  enabled: true,
-                                ),
-                                onTap: () => _handleQuickActionTap(
-                                    _QuickActionType.serialOutbound),
                               ),
                           ],
                         ),
