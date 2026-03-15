@@ -47,6 +47,7 @@ pub fn protected_routes() -> Router<AppState> {
         .route("/serials/inbound", post(serials::serial_inbound))
         .route("/serials/outbound", post(serials::serial_outbound))
         .route("/serials", get(serials::query_serials))
+        .route("/serials/history", get(serials::list_serial_history))
         .route("/products/scan", get(products::scan_product))
         .route(
             "/products/barcode-lookup",

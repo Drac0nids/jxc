@@ -217,6 +217,22 @@ impl RepositoryProvider {
         }
     }
 
+    pub async fn list_serials_history(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        status_filter: Option<&str>,
+        page: i64,
+        page_size: i64,
+    ) -> Result<(Vec<SerialNumber>, i64), AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.list_serials_history(pool, tenant_id, status_filter, page, page_size).await
+            }
+            Self::Memory(_) => Ok((vec![], 0)),
+        }
+    }
+
     pub async fn find_serial_by_sn(
         &self,
         pool: Option<&PgPool>,
@@ -5735,7 +5751,8 @@ impl PostgresRepository {
             // 查出该 SN，校验状态
             let row = sqlx::query(
                 r#"SELECT id, tenant_id, sn, product_id, batch_id, status,
-                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no
+                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no,
+                          created_at, updated_at
                    FROM serial_numbers WHERE tenant_id=$1 AND sn=$2"#,
             )
             .bind(tenant_id)
@@ -5781,6 +5798,8 @@ impl PostgresRepository {
                 sell_price,
                 inbound_biz_no: row.try_get("inbound_biz_no").map_err(|e| map_sqlx_error("读取inbound_biz_no失败", e))?,
                 outbound_biz_no: Some(outbound_biz_no.to_string()),
+                created_at: row.try_get("created_at").map_err(|e| map_sqlx_error("读取created_at失败", e))?,
+                updated_at: chrono::Utc::now(),
             });
         }
 
@@ -5814,18 +5833,20 @@ impl PostgresRepository {
         let rows = if let Some(status) = status_filter {
             sqlx::query(
                 r#"SELECT id, tenant_id, sn, product_id, batch_id, status,
-                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no
+                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no,
+                          created_at, updated_at
                    FROM serial_numbers WHERE tenant_id=$1 AND product_id=$2 AND status=$3
-                   ORDER BY created_at DESC"#,
+                   ORDER BY updated_at DESC"#,
             )
             .bind(tenant_id).bind(product_id).bind(status)
             .fetch_all(pool).await
         } else {
             sqlx::query(
                 r#"SELECT id, tenant_id, sn, product_id, batch_id, status,
-                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no
+                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no,
+                          created_at, updated_at
                    FROM serial_numbers WHERE tenant_id=$1 AND product_id=$2
-                   ORDER BY created_at DESC"#,
+                   ORDER BY updated_at DESC"#,
             )
             .bind(tenant_id).bind(product_id)
             .fetch_all(pool).await
@@ -5833,6 +5854,54 @@ impl PostgresRepository {
         .map_err(|e| map_sqlx_error("查询序列号列表失败", e))?;
 
         rows.iter().map(|row| Self::row_to_serial(row)).collect()
+    }
+
+    /// 全局 SN 历史，按 updated_at DESC 分页
+    pub async fn list_serials_history(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        status_filter: Option<&str>,
+        page: i64,
+        page_size: i64,
+    ) -> Result<(Vec<SerialNumber>, i64), AppError> {
+        let pool = require_pool(pool)?;
+        let offset = (page - 1) * page_size;
+
+        let total: i64 = if let Some(status) = status_filter {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM serial_numbers WHERE tenant_id=$1 AND status=$2"
+            ).bind(tenant_id).bind(status).fetch_one(pool).await
+        } else {
+            sqlx::query_scalar(
+                "SELECT COUNT(*) FROM serial_numbers WHERE tenant_id=$1"
+            ).bind(tenant_id).fetch_one(pool).await
+        }.map_err(|e| map_sqlx_error("统计序列号历史失败", e))?;
+
+        let rows = if let Some(status) = status_filter {
+            sqlx::query(
+                r#"SELECT id, tenant_id, sn, product_id, batch_id, status,
+                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no,
+                          created_at, updated_at
+                   FROM serial_numbers WHERE tenant_id=$1 AND status=$2
+                   ORDER BY updated_at DESC LIMIT $3 OFFSET $4"#,
+            )
+            .bind(tenant_id).bind(status).bind(page_size).bind(offset)
+            .fetch_all(pool).await
+        } else {
+            sqlx::query(
+                r#"SELECT id, tenant_id, sn, product_id, batch_id, status,
+                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no,
+                          created_at, updated_at
+                   FROM serial_numbers WHERE tenant_id=$1
+                   ORDER BY updated_at DESC LIMIT $2 OFFSET $3"#,
+            )
+            .bind(tenant_id).bind(page_size).bind(offset)
+            .fetch_all(pool).await
+        }.map_err(|e| map_sqlx_error("查询序列号历史失败", e))?;
+
+        let list = rows.iter().map(|row| Self::row_to_serial(row)).collect::<Result<Vec<_>, _>>()?;
+        Ok((list, total))
     }
 
     /// 按 SN 精确查询
@@ -5845,7 +5914,8 @@ impl PostgresRepository {
         let pool = require_pool(pool)?;
         let row = sqlx::query(
             r#"SELECT id, tenant_id, sn, product_id, batch_id, status,
-                      unit_cost, sell_price, inbound_biz_no, outbound_biz_no
+                      unit_cost, sell_price, inbound_biz_no, outbound_biz_no,
+                      created_at, updated_at
                FROM serial_numbers WHERE tenant_id=$1 AND sn=$2"#,
         )
         .bind(tenant_id)
@@ -5869,6 +5939,8 @@ impl PostgresRepository {
             sell_price:      row.try_get("sell_price").map_err(|e| map_sqlx_error("sell_price", e))?,
             inbound_biz_no:  row.try_get("inbound_biz_no").map_err(|e| map_sqlx_error("inbound_biz_no", e))?,
             outbound_biz_no: row.try_get("outbound_biz_no").map_err(|e| map_sqlx_error("outbound_biz_no", e))?,
+            created_at:      row.try_get("created_at").map_err(|e| map_sqlx_error("created_at", e))?,
+            updated_at:      row.try_get("updated_at").map_err(|e| map_sqlx_error("updated_at", e))?,
         })
     }
 }

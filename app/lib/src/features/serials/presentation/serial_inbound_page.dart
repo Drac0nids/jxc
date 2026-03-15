@@ -7,6 +7,7 @@ import '../../products/application/product_controller.dart';
 import '../../products/models/product_models.dart';
 import '../models/serial_models.dart';
 import '../models/serial_repository.dart';
+import 'serial_logs_page.dart';
 
 class SerialInboundPage extends StatefulWidget {
   const SerialInboundPage({
@@ -183,6 +184,18 @@ class _SerialInboundPageState extends State<SerialInboundPage> {
       backgroundColor: cs.surface,
       appBar: AppBar(
         title: const Text('序列号入库'),
+        actions: [
+          IconButton(
+            tooltip: 'SN 历史记录',
+            icon: const Icon(Icons.history_rounded),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => SerialLogsPage(repository: widget.repository),
+              ),
+            ),
+          ),
+        ],
         leading: BackButton(
           onPressed: () {
             if (_scanning) _stopScanning();

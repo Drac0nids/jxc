@@ -5,6 +5,7 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../core/widgets/brand_ui.dart';
 import '../models/serial_models.dart';
 import '../models/serial_repository.dart';
+import 'serial_logs_page.dart';
 
 class SerialOutboundPage extends StatefulWidget {
   const SerialOutboundPage({super.key, required this.repository});
@@ -168,6 +169,16 @@ class _SerialOutboundPageState extends State<SerialOutboundPage> {
             tooltip: '设置出售价格',
             icon: const Icon(Icons.price_change_outlined),
             onPressed: () => setState(() => _showPriceField = !_showPriceField),
+          ),
+          IconButton(
+            tooltip: 'SN 历史记录',
+            icon: const Icon(Icons.history_rounded),
+            onPressed: () => Navigator.push(
+              context,
+              MaterialPageRoute<void>(
+                builder: (_) => SerialLogsPage(repository: widget.repository),
+              ),
+            ),
           ),
         ],
       ),

@@ -71,4 +71,26 @@ class SerialRepository {
     );
     return envelope.data;
   }
+  /// 查询 SN 历史记录（全局，分页）
+  Future<SerialHistoryResult> fetchHistory({
+    String? status,
+    int page = 1,
+    int pageSize = 20,
+  }) async {
+    final envelope = await _client.get<SerialHistoryResult>(
+      '/serials/history',
+      query: <String, dynamic>{
+        if (status != null) 'status': status,
+        'page': page,
+        'page_size': pageSize,
+      },
+      decoder: (Object? raw) {
+        if (raw is! Map<String, dynamic>) {
+          return SerialHistoryResult(list: [], total: 0, page: page, pageSize: pageSize);
+        }
+        return SerialHistoryResult.fromJson(raw);
+      },
+    );
+    return envelope.data;
+  }
 }

@@ -44,6 +44,18 @@ pub struct SerialListQuery {
     pub status: Option<String>,
 }
 
+#[derive(Deserialize)]
+pub struct SerialHistoryQuery {
+    pub status: Option<String>,
+    #[serde(default = "default_page")]
+    pub page: i64,
+    #[serde(default = "default_page_size")]
+    pub page_size: i64,
+}
+
+fn default_page() -> i64 { 1 }
+fn default_page_size() -> i64 { 20 }
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn parse_optional_decimal(s: &Option<String>, field: &str, request_id: &str) -> Result<Option<Decimal>, AppError> {
@@ -182,5 +194,37 @@ pub async fn query_serials(
 
     let total = list.len() as u64;
     let body = ApiResponse::success(json!({ "list": list, "total": total }), request_id.clone());
+    Ok((StatusCode::OK, build_response_headers(&request_id, false), Json(body)).into_response())
+}
+
+// ── list serial history ────────────────────────────────────────────────────────
+
+pub async fn list_serial_history(
+    State(state): State<AppState>,
+    Extension(auth): Extension<AuthContext>,
+    headers: HeaderMap,
+    Query(q): Query<SerialHistoryQuery>,
+) -> Result<Response, AppError> {
+    let request_id = resolve_request_id(&headers);
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER", "SALES"], &request_id)?;
+
+    let page = q.page.max(1);
+    let page_size = q.page_size.clamp(10, 100);
+
+    let (list, total) = state.repository
+        .list_serials_history(
+            postgres_pool_or_none(&state),
+            auth.tenant_id,
+            q.status.as_deref(),
+            page,
+            page_size,
+        )
+        .await
+        .map_err(|e| e.with_request_id(request_id.clone()))?;
+
+    let body = ApiResponse::success(
+        json!({ "list": list, "total": total, "page": page, "page_size": page_size }),
+        request_id.clone(),
+    );
     Ok((StatusCode::OK, build_response_headers(&request_id, false), Json(body)).into_response())
 }

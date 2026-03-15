@@ -13,6 +13,8 @@ class SerialNumber {
     this.sellPrice,
     this.inboundBizNo,
     this.outboundBizNo,
+    this.createdAt,
+    this.updatedAt,
   });
 
   final String id;
@@ -24,6 +26,8 @@ class SerialNumber {
   final String? sellPrice;
   final String? inboundBizNo;
   final String? outboundBizNo;
+  final DateTime? createdAt;
+  final DateTime? updatedAt;
 
   bool get isInStock => status == 'IN_STOCK';
 
@@ -37,6 +41,12 @@ class SerialNumber {
         sellPrice: json['sell_price']?.toString(),
         inboundBizNo: json['inbound_biz_no']?.toString(),
         outboundBizNo: json['outbound_biz_no']?.toString(),
+        createdAt: json['created_at'] != null
+            ? DateTime.tryParse(json['created_at'].toString())
+            : null,
+        updatedAt: json['updated_at'] != null
+            ? DateTime.tryParse(json['updated_at'].toString())
+            : null,
       );
 }
 
@@ -121,6 +131,33 @@ class SerialOutboundResult {
       );
 }
 
+
+// ── 历史查询结果 ─────────────────────────────────────────────────────────────
+
+class SerialHistoryResult {
+  const SerialHistoryResult({
+    required this.list,
+    required this.total,
+    required this.page,
+    required this.pageSize,
+  });
+
+  final List<SerialNumber> list;
+  final int total;
+  final int page;
+  final int pageSize;
+
+  factory SerialHistoryResult.fromJson(Map<String, dynamic> json) =>
+      SerialHistoryResult(
+        list: (json['list'] as List<dynamic>? ?? <dynamic>[])
+            .whereType<Map<String, dynamic>>()
+            .map(SerialNumber.fromJson)
+            .toList(),
+        total: _toInt(json['total']),
+        page: _toInt(json['page']),
+        pageSize: _toInt(json['page_size']),
+      );
+}
 // ── 扫码会话中的临时条目 ──────────────────────────────────────────────────────
 
 class SerialScanEntry {

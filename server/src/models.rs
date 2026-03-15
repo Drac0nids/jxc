@@ -108,6 +108,8 @@ pub struct SerialNumber {
     pub sell_price:     Option<Decimal>,
     pub inbound_biz_no:  Option<String>,
     pub outbound_biz_no: Option<String>,
+    pub created_at:     chrono::DateTime<chrono::Utc>,
+    pub updated_at:     chrono::DateTime<chrono::Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
