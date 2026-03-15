@@ -818,48 +818,45 @@ class _DashboardPageState extends State<DashboardPage>
                         ),
                       )
                     else ...<Widget>[
-                      // ── 销售出库模块 ──────────────────────────────
-                      if (canOutbound) ...<Widget>[
-                        const _SectionTitle(label: '销售出库'),
+                      // ── 出库 / 入库（模式切换卡）──────────────
+                      if (canOutbound || canInbound) ...<Widget>[
+                        const _SectionTitle(label: '出入库'),
                         const SizedBox(height: 8),
-                        _ScanModuleCard(
-                          confirmLabel: '确认写入出库',
-                          confirmSubtitle: '扫一件，确认数量/单价后写入',
-                          continuousLabel: '连续扫码出库',
-                          continuousSubtitle: '摄像头持续开启，批量快速录入',
-                          color: const Color(0xFFF59E0B),
-                          icon: Icons.local_shipping_rounded,
-                          onConfirm: () => _navigateWithScan(
-                              _QuickActionType.outbound,
-                              _ScanModeEntry.scanConfirm),
-                          onContinuous: () => _navigateWithScan(
-                              _QuickActionType.outbound,
-                              _ScanModeEntry.continuousScan),
-                          onFull: () => _handleQuickActionTap(
-                              _QuickActionType.outbound),
-                        ),
-                        const SizedBox(height: 12),
-                      ],
-
-                      // ── 采购入库模块 ──────────────────────────────
-                      if (canInbound) ...<Widget>[
-                        const _SectionTitle(label: '采购入库'),
-                        const SizedBox(height: 8),
-                        _ScanModuleCard(
-                          confirmLabel: '确认写入入库',
-                          confirmSubtitle: '扫一件，确认数量/成本后写入',
-                          continuousLabel: '连续扫码入库',
-                          continuousSubtitle: '摄像头持续开启，批量快速录入',
-                          color: const Color(0xFF10B981),
-                          icon: Icons.move_to_inbox_rounded,
-                          onConfirm: () => _navigateWithScan(
-                              _QuickActionType.inbound,
-                              _ScanModeEntry.scanConfirm),
-                          onContinuous: () => _navigateWithScan(
-                              _QuickActionType.inbound,
-                              _ScanModeEntry.continuousScan),
-                          onFull: () => _handleQuickActionTap(
-                              _QuickActionType.inbound),
+                        GridView.count(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 1.45,
+                          children: <Widget>[
+                            if (canOutbound)
+                              _ScanToggleCard(
+                                title: '销售出库',
+                                icon: Icons.local_shipping_rounded,
+                                color: const Color(0xFFF59E0B),
+                                onEnter: (bool continuous) => continuous
+                                    ? _navigateWithScan(
+                                        _QuickActionType.outbound,
+                                        _ScanModeEntry.continuousScan)
+                                    : _navigateWithScan(
+                                        _QuickActionType.outbound,
+                                        _ScanModeEntry.scanConfirm),
+                              ),
+                            if (canInbound)
+                              _ScanToggleCard(
+                                title: '采购入库',
+                                icon: Icons.move_to_inbox_rounded,
+                                color: const Color(0xFF10B981),
+                                onEnter: (bool continuous) => continuous
+                                    ? _navigateWithScan(
+                                        _QuickActionType.inbound,
+                                        _ScanModeEntry.continuousScan)
+                                    : _navigateWithScan(
+                                        _QuickActionType.inbound,
+                                        _ScanModeEntry.scanConfirm),
+                              ),
+                          ],
                         ),
                         const SizedBox(height: 12),
                       ],
@@ -1752,142 +1749,139 @@ class _AlertStatusTile extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// _ScanModuleCard — 扫码模块入口卡（含两种模式 + 完整表单入口）
+// _ScanToggleCard — 带模式切换的扫码入口卡
 // ════════════════════════════════════════════════════════════════════════════
 
-class _ScanModuleCard extends StatelessWidget {
-  const _ScanModuleCard({
-    required this.confirmLabel,
-    required this.confirmSubtitle,
-    required this.continuousLabel,
-    required this.continuousSubtitle,
-    required this.color,
+class _ScanToggleCard extends StatefulWidget {
+  const _ScanToggleCard({
+    required this.title,
     required this.icon,
-    required this.onConfirm,
-    required this.onContinuous,
-    required this.onFull,
+    required this.color,
+    required this.onEnter,
   });
 
-  final String confirmLabel;
-  final String confirmSubtitle;
-  final String continuousLabel;
-  final String continuousSubtitle;
-  final Color color;
+  final String title;
   final IconData icon;
-  final VoidCallback onConfirm;
-  final VoidCallback onContinuous;
-  final VoidCallback onFull;
+  final Color color;
+  /// continuous=true → 连续扫码；false → 确认模式
+  final void Function(bool continuous) onEnter;
+
+  @override
+  State<_ScanToggleCard> createState() => _ScanToggleCardState();
+}
+
+class _ScanToggleCardState extends State<_ScanToggleCard> {
+  bool _continuous = true; // 默认：连续扫码
 
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
-    return Card(
-      margin: EdgeInsets.zero,
-      child: Column(
-        children: <Widget>[
-          // 确认写入
-          InkWell(
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-            onTap: onConfirm,
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+    final color = widget.color;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(16),
+      onTap: () => widget.onEnter(_continuous),
+      child: Ink(
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          color: color.withValues(alpha: 0.08),
+          border: Border.all(color: color.withValues(alpha: 0.22), width: 1),
+        ),
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            // 图标 + 标题行
+            Row(
+              children: <Widget>[
+                Container(
+                  padding: const EdgeInsets.all(7),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.14),
+                    shape: BoxShape.circle,
+                  ),
+                  child: Icon(widget.icon, color: color, size: 20),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.title,
+                    style: const TextStyle(
+                        fontWeight: FontWeight.w700, fontSize: 14),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Icon(Icons.arrow_forward_ios_rounded,
+                    size: 12, color: cs.onSurfaceVariant),
+              ],
+            ),
+            const Spacer(),
+            // 模式切换胶囊
+            GestureDetector(
+              // 阻止点击切换器时同时触发外层 InkWell
+              onTap: () {},
               child: Row(
+                mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(Icons.qr_code_scanner_rounded,
-                        size: 18, color: color),
+                  _ModeChip(
+                    label: '确认',
+                    selected: !_continuous,
+                    color: color,
+                    onTap: () => setState(() => _continuous = false),
                   ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(confirmLabel,
-                            style: const TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w600)),
-                        Text(confirmSubtitle,
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: cs.onSurfaceVariant)),
-                      ],
-                    ),
+                  const SizedBox(width: 6),
+                  _ModeChip(
+                    label: '连续',
+                    selected: _continuous,
+                    color: color,
+                    onTap: () => setState(() => _continuous = true),
                   ),
-                  Icon(Icons.chevron_right_rounded,
-                      size: 18, color: cs.onSurfaceVariant),
                 ],
               ),
             ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ModeChip extends StatelessWidget {
+  const _ModeChip({
+    required this.label,
+    required this.selected,
+    required this.color,
+    required this.onTap,
+  });
+  final String label;
+  final bool selected;
+  final Color color;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      child: AnimatedContainer(
+        duration: const Duration(milliseconds: 180),
+        padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
+        decoration: BoxDecoration(
+          color: selected ? color.withValues(alpha: 0.18) : Colors.transparent,
+          borderRadius: BorderRadius.circular(20),
+          border: Border.all(
+            color: selected ? color : color.withValues(alpha: 0.3),
+            width: 1,
           ),
-          Divider(height: 1, indent: 62, color: cs.outlineVariant),
-          // 连续扫码
-          InkWell(
-            onTap: onContinuous,
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
-              child: Row(
-                children: <Widget>[
-                  Container(
-                    width: 36,
-                    height: 36,
-                    decoration: BoxDecoration(
-                      color: color.withValues(alpha: 0.12),
-                      borderRadius: BorderRadius.circular(8),
-                    ),
-                    child: Icon(Icons.repeat_rounded, size: 18, color: color),
-                  ),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(continuousLabel,
-                            style: const TextStyle(
-                                fontSize: 14, fontWeight: FontWeight.w600)),
-                        Text(continuousSubtitle,
-                            style: TextStyle(
-                                fontSize: 12,
-                                color: cs.onSurfaceVariant)),
-                      ],
-                    ),
-                  ),
-                  Icon(Icons.chevron_right_rounded,
-                      size: 18, color: cs.onSurfaceVariant),
-                ],
-              ),
-            ),
+        ),
+        child: Text(
+          label,
+          style: TextStyle(
+            fontSize: 11,
+            fontWeight: selected ? FontWeight.w700 : FontWeight.normal,
+            color: selected ? color : color.withValues(alpha: 0.6),
           ),
-          Divider(height: 1, indent: 62, color: cs.outlineVariant),
-          // 完整表单入口
-          InkWell(
-            borderRadius:
-                const BorderRadius.vertical(bottom: Radius.circular(12)),
-            onTap: onFull,
-            child: Padding(
-              padding:
-                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-              child: Row(
-                children: <Widget>[
-                  const SizedBox(width: 48),
-                  Text('进入完整表单',
-                      style: TextStyle(
-                          fontSize: 12,
-                          color: cs.onSurfaceVariant)),
-                  const Spacer(),
-                  Icon(Icons.open_in_new_rounded,
-                      size: 14, color: cs.onSurfaceVariant),
-                ],
-              ),
-            ),
-          ),
-        ],
+        ),
       ),
     );
   }
