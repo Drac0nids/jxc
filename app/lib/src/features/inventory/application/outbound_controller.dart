@@ -52,11 +52,13 @@ class OutboundScanPreview {
     required this.productId,
     required this.productName,
     required this.suggestedSellPrice,
+    required this.currentStock,
   });
 
   final String productId;
   final String productName;
   final String suggestedSellPrice;
+  final int currentStock;
 }
 
 class OutboundController extends ChangeNotifier {
@@ -280,6 +282,7 @@ class OutboundController extends ChangeNotifier {
         productId: scanned.id.toString(),
         productName: scanned.name,
         suggestedSellPrice: sellPrice,
+        currentStock: scanned.currentStock,
       );
     } catch (error) {
       _scanErrorMessage = _humanizeError(error, forScan: true);
