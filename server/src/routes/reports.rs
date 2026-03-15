@@ -407,6 +407,7 @@ pub async fn get_dashboard_orders_drilldown(
                             .round_dp(4)
                             .to_string(),
                         returned_qty: item.returned_qty.max(0),
+                        sns: Vec::new(),
                     })
                 })
                 .collect::<Vec<_>>();
@@ -445,11 +446,51 @@ pub async fn get_dashboard_orders_drilldown(
     let start = ((page - 1) * page_size) as usize;
     let end = usize::min(start + page_size as usize, matched_orders.len());
 
-    let list = if start >= matched_orders.len() {
+    let mut list = if start >= matched_orders.len() {
         Vec::new()
     } else {
         matched_orders[start..end].to_vec()
     };
+
+    // ── Postgres 路径：批量查当前页订单的 SN 码，按 (outbound_biz_no, product_id) group ──
+    if let Some(pool) = postgres_pool_or_none(&state) {
+        let biz_nos: Vec<String> = list.iter().map(|o| o.biz_no.clone()).collect();
+        if !biz_nos.is_empty() {
+            let rows = sqlx::query(
+                r#"
+                SELECT outbound_biz_no, product_id, sn
+                FROM serial_numbers
+                WHERE tenant_id = $1
+                  AND outbound_biz_no = ANY($2)
+                  AND status = 'SOLD'
+                ORDER BY outbound_biz_no, product_id, sn
+                "#,
+            )
+            .bind(auth.tenant_id)
+            .bind(&biz_nos)
+            .fetch_all(pool)
+            .await
+            .unwrap_or_default();
+
+            let mut sn_map: HashMap<(String, i64), Vec<String>> = HashMap::new();
+            for row in &rows {
+                use sqlx::Row;
+                let biz_no: String = row.try_get("outbound_biz_no").unwrap_or_default();
+                let product_id: i64 = row.try_get("product_id").unwrap_or_default();
+                let sn: String = row.try_get("sn").unwrap_or_default();
+                sn_map.entry((biz_no, product_id)).or_default().push(sn);
+            }
+
+            for order in &mut list {
+                for item in &mut order.items {
+                    let key = (order.biz_no.clone(), item.product_id);
+                    if let Some(sns) = sn_map.get(&key) {
+                        item.sns = sns.clone();
+                    }
+                }
+            }
+        }
+    }
 
     let body = ApiResponse::success(
         json!({

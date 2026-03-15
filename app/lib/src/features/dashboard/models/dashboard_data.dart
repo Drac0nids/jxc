@@ -123,6 +123,7 @@ class SalesOrderItemData {
     required this.sellPrice,
     required this.lineAmount,
     required this.returnedQty,
+    this.sns = const [],
   });
 
   final int productId;
@@ -131,11 +132,18 @@ class SalesOrderItemData {
   final String sellPrice;
   final String lineAmount;
   final int returnedQty;
+  /// 该明细行出库的 SN 码列表（非序列号商品为空）
+  final List<String> sns;
 
   factory SalesOrderItemData.fromJson(Map<String, dynamic> json) {
     final int productId = toInt(json['product_id']);
     final String rawName = (json['product_name'] ?? '').toString().trim();
     final String safeProductName = rawName.isEmpty ? '商品#$productId' : rawName;
+
+    final rawSns = json['sns'];
+    final List<String> sns = (rawSns is List)
+        ? rawSns.map((e) => e.toString()).toList()
+        : const [];
 
     return SalesOrderItemData(
       productId: productId,
@@ -148,6 +156,7 @@ class SalesOrderItemData {
         rawSellPrice: json['sell_price'],
       ),
       returnedQty: toInt(json['returned_qty']),
+      sns: sns,
     );
   }
 }

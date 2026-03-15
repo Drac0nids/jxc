@@ -769,6 +769,7 @@ class _ItemRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final hasReturn = item.returnedQty > 0;
+    final hasSns = item.sns.isNotEmpty;
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: <Widget>[
@@ -796,7 +797,7 @@ class _ItemRow extends StatelessWidget {
             SizedBox(
               width: 56,
               child: Text(
-                '¥${item.sellPrice}',
+                '¥\${item.sellPrice}',
                 textAlign: TextAlign.right,
                 style: const TextStyle(fontSize: 13),
               ),
@@ -804,7 +805,7 @@ class _ItemRow extends StatelessWidget {
             SizedBox(
               width: 64,
               child: Text(
-                '¥${item.lineAmount}',
+                '¥\${item.lineAmount}',
                 textAlign: TextAlign.right,
                 style:
                     const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
@@ -821,12 +822,39 @@ class _ItemRow extends StatelessWidget {
                     size: 12, color: scheme.error),
                 const SizedBox(width: 3),
                 Text(
-                  '已退 ${item.returnedQty} 件',
+                  '已退 \${item.returnedQty} 件',
                   style: TextStyle(fontSize: 11, color: scheme.error),
                 ),
               ],
             ),
           ),
+        // ── SN 码徽章 ──────────────────────────────────
+        if (hasSns) ...<Widget>[
+          const SizedBox(height: 5),
+          Wrap(
+            spacing: 4,
+            runSpacing: 4,
+            children: item.sns
+                .map((sn) => Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 6, vertical: 2),
+                      decoration: BoxDecoration(
+                        color: scheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(4),
+                      ),
+                      child: Text(
+                        sn,
+                        style: TextStyle(
+                          fontSize: 10,
+                          fontWeight: FontWeight.w600,
+                          color: scheme.onPrimaryContainer,
+                          fontFamily: 'monospace',
+                        ),
+                      ),
+                    ))
+                .toList(),
+          ),
+        ],
       ],
     );
   }

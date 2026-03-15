@@ -325,6 +325,9 @@ pub struct SalesOrderItemData {
     pub sell_price: String,
     pub line_amount: String,
     pub returned_qty: i32,
+    /// 该明细行出库的 SN 码列表（仅 track_serials=true 的商品才有值）
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub sns: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -621,6 +624,7 @@ pub fn to_sales_order_data(
             sell_price: rounded_sell_price.to_string(),
             line_amount: line_amount.to_string(),
             returned_qty: item.returned_qty,
+            sns: Vec::new(),
         });
     }
 
