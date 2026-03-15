@@ -525,6 +525,7 @@ class _OrderReceiptCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final double amount = double.tryParse(order.totalAmount) ?? 0;
+    final bool isSynthetic = order.id < 0;
 
     return Container(
       width: double.infinity,
@@ -535,137 +536,84 @@ class _OrderReceiptCard extends StatelessWidget {
         boxShadow: <BoxShadow>[
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
+            blurRadius: 8,
+            offset: const Offset(0, 3),
           ),
         ],
       ),
       child: Column(
         children: <Widget>[
-          // ── Header ──────────────────────────────────────────────────────
+          // ── Header ─────────────────────────────────────────────────────
           Padding(
             padding: const EdgeInsets.fromLTRB(14, 12, 14, 10),
-            child: Row(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: <Widget>[
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
+                // Row 1: 单号 + 状态
+                Row(
+                  crossAxisAlignment: CrossAxisAlignment.center,
+                  children: <Widget>[
+                    Expanded(
+                      child: Text(
                         order.bizNo,
                         style: const TextStyle(
                             fontWeight: FontWeight.w800, fontSize: 14),
                         overflow: TextOverflow.ellipsis,
                       ),
-                      const SizedBox(height: 2),
-                      Text(
-                        '#${order.id}',
-                        style: TextStyle(
-                            fontSize: 11, color: scheme.onSurfaceVariant),
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                // Status badge
-                Container(
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-                  decoration: BoxDecoration(
-                    color: statusBg,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Text(
-                    statusLabel,
-                    style: TextStyle(
-                      color: statusFg,
-                      fontWeight: FontWeight.w700,
-                      fontSize: 11,
                     ),
-                  ),
+                    const SizedBox(width: 8),
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        color: statusBg,
+                        borderRadius: BorderRadius.circular(999),
+                      ),
+                      child: Text(
+                        statusLabel,
+                        style: TextStyle(
+                          color: statusFg,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 11,
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-              ],
-            ),
-          ),
-
-          // ── Amount highlight ─────────────────────────────────────────────
-          Container(
-            margin: const EdgeInsets.symmetric(horizontal: 14),
-            padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-            decoration: BoxDecoration(
-              color: const Color(0xFF10B981).withValues(alpha: 0.08),
-              borderRadius: BorderRadius.circular(10),
-            ),
-            child: Row(
-              children: <Widget>[
-                Text(
-                  '订单总额',
-                  style:
-                      TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
-                ),
-                const Spacer(),
-                Text(
-                  '¥${amount.toStringAsFixed(2)}',
-                  style: const TextStyle(
-                    fontSize: 20,
-                    fontWeight: FontWeight.w900,
-                    color: Color(0xFF10B981),
-                    letterSpacing: -0.5,
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 10),
-
-          // ── Items divider ────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Divider(height: 1, color: scheme.outlineVariant),
-          ),
-          const SizedBox(height: 10),
-
-          // ── Items table ──────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: order.items.isEmpty
-                ? _EmptyItemsNotice(scheme: scheme)
-                : _ItemsTable(items: order.items, scheme: scheme),
-          ),
-          const SizedBox(height: 10),
-
-          // ── Footer ───────────────────────────────────────────────────────
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 14),
-            child: Divider(height: 1, color: scheme.outlineVariant),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(14, 8, 14, 12),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
+                const SizedBox(height: 6),
+                // Row 2: 时间左 + 总额右
                 Row(
                   children: <Widget>[
                     Icon(Icons.access_time_rounded,
-                        size: 13, color: scheme.onSurfaceVariant),
+                        size: 12, color: scheme.onSurfaceVariant),
                     const SizedBox(width: 4),
                     Text(
                       formatDateTime(order.createdAt),
                       style: TextStyle(
-                          fontSize: 12, color: scheme.onSurfaceVariant),
+                          fontSize: 11, color: scheme.onSurfaceVariant),
                     ),
                     if (order.confirmedAt != null &&
                         order.confirmedAt!.isNotEmpty) ...<Widget>[
-                      const SizedBox(width: 12),
+                      const SizedBox(width: 8),
                       Icon(Icons.check_circle_outline_rounded,
-                          size: 13, color: scheme.onSurfaceVariant),
-                      const SizedBox(width: 4),
+                          size: 12, color: scheme.onSurfaceVariant),
+                      const SizedBox(width: 3),
                       Text(
                         '确认 ${formatDateTime(order.confirmedAt)}',
                         style: TextStyle(
-                            fontSize: 12, color: scheme.onSurfaceVariant),
+                            fontSize: 11, color: scheme.onSurfaceVariant),
                       ),
                     ],
+                    const Spacer(),
+                    Text(
+                      '¥${amount.toStringAsFixed(2)}',
+                      style: const TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.w900,
+                        color: Color(0xFF10B981),
+                        letterSpacing: -0.5,
+                      ),
+                    ),
                   ],
                 ),
                 if (_notBlank(order.remark)) ...<Widget>[
@@ -673,13 +621,13 @@ class _OrderReceiptCard extends StatelessWidget {
                   Row(
                     children: <Widget>[
                       Icon(Icons.notes_rounded,
-                          size: 13, color: scheme.onSurfaceVariant),
+                          size: 12, color: scheme.onSurfaceVariant),
                       const SizedBox(width: 4),
                       Expanded(
                         child: Text(
                           order.remark!,
                           style: TextStyle(
-                              fontSize: 12, color: scheme.onSurfaceVariant),
+                              fontSize: 11, color: scheme.onSurfaceVariant),
                           overflow: TextOverflow.ellipsis,
                           maxLines: 2,
                         ),
@@ -687,8 +635,38 @@ class _OrderReceiptCard extends StatelessWidget {
                     ],
                   ),
                 ],
+                if (isSynthetic) ...<Widget>[
+                  const SizedBox(height: 4),
+                  Row(
+                    children: <Widget>[
+                      Icon(Icons.info_outline_rounded,
+                          size: 11,
+                          color: scheme.onSurfaceVariant.withValues(alpha: 0.6)),
+                      const SizedBox(width: 3),
+                      Text(
+                        '由出库记录聚合，无关联销售单据',
+                        style: TextStyle(
+                            fontSize: 10,
+                            color: scheme.onSurfaceVariant
+                                .withValues(alpha: 0.6)),
+                      ),
+                    ],
+                  ),
+                ],
               ],
             ),
+          ),
+
+          // ── Items ────────────────────────────────────────────────────────
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 14),
+            child: Divider(height: 1, color: scheme.outlineVariant),
+          ),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 10, 14, 14),
+            child: order.items.isEmpty
+                ? _EmptyItemsNotice(scheme: scheme)
+                : _ItemsTable(items: order.items, scheme: scheme),
           ),
         ],
       ),
@@ -710,51 +688,53 @@ class _ItemsTable extends StatelessWidget {
   Widget build(BuildContext context) {
     return Column(
       children: <Widget>[
-        // Header row
-        Row(
-          children: <Widget>[
-            Expanded(
-              flex: 5,
-              child: Text('商品',
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: scheme.onSurfaceVariant)),
-            ),
-            SizedBox(
-              width: 44,
-              child: Text('数量',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: scheme.onSurfaceVariant)),
-            ),
-            SizedBox(
-              width: 56,
-              child: Text('单价',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: scheme.onSurfaceVariant)),
-            ),
-            SizedBox(
-              width: 64,
-              child: Text('小计',
-                  textAlign: TextAlign.right,
-                  style: TextStyle(
-                      fontSize: 11,
-                      fontWeight: FontWeight.w700,
-                      color: scheme.onSurfaceVariant)),
-            ),
-          ],
+        // 表头
+        Padding(
+          padding: const EdgeInsets.only(bottom: 6),
+          child: Row(
+            children: <Widget>[
+              Expanded(
+                flex: 6,
+                child: Text('商品',
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurfaceVariant)),
+              ),
+              SizedBox(
+                width: 36,
+                child: Text('数量',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurfaceVariant)),
+              ),
+              SizedBox(
+                width: 72,
+                child: Text('小计',
+                    textAlign: TextAlign.right,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: scheme.onSurfaceVariant)),
+              ),
+            ],
+          ),
         ),
-        const SizedBox(height: 6),
-        ...items.map((item) => Padding(
-              padding: const EdgeInsets.only(top: 6),
-              child: _ItemRow(item: item, scheme: scheme),
-            )),
+        // 每行之间加极细分割线
+        ...List.generate(items.length, (i) {
+          final item = items[i];
+          return Column(
+            children: <Widget>[
+              if (i > 0)
+                Divider(
+                    height: 1,
+                    color: scheme.outlineVariant.withValues(alpha: 0.5)),
+              _ItemRow(item: item, scheme: scheme),
+            ],
+          );
+        }),
       ],
     );
   }
@@ -770,92 +750,105 @@ class _ItemRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final hasReturn = item.returnedQty > 0;
     final hasSns = item.sns.isNotEmpty;
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        Row(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Expanded(
-              flex: 5,
-              child: Text(
-                item.productName,
-                style:
-                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w500),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+
+    return Container(
+      // 浅底色区分每行
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerLowest,
+        borderRadius: BorderRadius.circular(6),
+      ),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 7),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          // 商品名 + 数量 + 小计
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Expanded(
+                flex: 6,
+                child: Text(
+                  item.productName,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w500),
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              SizedBox(
+                width: 36,
+                child: Text(
+                  '${item.qty}',
+                  textAlign: TextAlign.right,
+                  style: TextStyle(
+                      fontSize: 13, color: scheme.onSurfaceVariant),
+                ),
+              ),
+              SizedBox(
+                width: 72,
+                child: Text(
+                  '¥${item.lineAmount}',
+                  textAlign: TextAlign.right,
+                  style: const TextStyle(
+                      fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ),
+            ],
+          ),
+          // 单价副行（小字）
+          Padding(
+            padding: const EdgeInsets.only(top: 2),
+            child: Text(
+              '单价 ¥${item.sellPrice}',
+              style: TextStyle(
+                  fontSize: 10, color: scheme.onSurfaceVariant),
+            ),
+          ),
+          // 退货标记
+          if (hasReturn)
+            Padding(
+              padding: const EdgeInsets.only(top: 3),
+              child: Row(
+                children: <Widget>[
+                  Icon(Icons.keyboard_return_rounded,
+                      size: 11, color: scheme.error),
+                  const SizedBox(width: 3),
+                  Text(
+                    '已退 ${item.returnedQty} 件',
+                    style: TextStyle(fontSize: 10, color: scheme.error),
+                  ),
+                ],
               ),
             ),
-            SizedBox(
-              width: 44,
-              child: Text(
-                '${item.qty}',
-                textAlign: TextAlign.right,
-                style: const TextStyle(fontSize: 13),
-              ),
-            ),
-            SizedBox(
-              width: 56,
-              child: Text(
-                '¥${item.sellPrice}',
-                textAlign: TextAlign.right,
-                style: const TextStyle(fontSize: 13),
-              ),
-            ),
-            SizedBox(
-              width: 64,
-              child: Text(
-                '¥${item.lineAmount}',
-                textAlign: TextAlign.right,
-                style:
-                    const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
-              ),
+          // SN 码徽章
+          if (hasSns) ...<Widget>[
+            const SizedBox(height: 5),
+            Wrap(
+              spacing: 4,
+              runSpacing: 4,
+              children: item.sns
+                  .map((sn) => Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 5, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: scheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          sn,
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.w600,
+                            color: scheme.onPrimaryContainer,
+                            fontFamily: 'monospace',
+                          ),
+                        ),
+                      ))
+                  .toList(),
             ),
           ],
-        ),
-        if (hasReturn)
-          Padding(
-            padding: const EdgeInsets.only(top: 3),
-            child: Row(
-              children: <Widget>[
-                Icon(Icons.keyboard_return_rounded,
-                    size: 12, color: scheme.error),
-                const SizedBox(width: 3),
-                Text(
-                  '已退 ${item.returnedQty} 件',
-                  style: TextStyle(fontSize: 11, color: scheme.error),
-                ),
-              ],
-            ),
-          ),
-        // ── SN 码徽章 ──────────────────────────────────
-        if (hasSns) ...<Widget>[
-          const SizedBox(height: 5),
-          Wrap(
-            spacing: 4,
-            runSpacing: 4,
-            children: item.sns
-                .map((sn) => Container(
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 6, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: scheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(4),
-                      ),
-                      child: Text(
-                        sn,
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.w600,
-                          color: scheme.onPrimaryContainer,
-                          fontFamily: 'monospace',
-                        ),
-                      ),
-                    ))
-                .toList(),
-          ),
         ],
-      ],
+      ),
     );
   }
 }
@@ -868,23 +861,26 @@ class _EmptyItemsNotice extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.6),
-        borderRadius: BorderRadius.circular(8),
-      ),
-      child: Text(
-        '无明细（流水聚合行）',
-        style: TextStyle(
-            fontSize: 12,
-            color: scheme.onSurfaceVariant,
-            fontWeight: FontWeight.w600),
-      ),
+    return Row(
+      children: <Widget>[
+        Icon(Icons.receipt_long_outlined,
+            size: 14, color: scheme.onSurfaceVariant.withValues(alpha: 0.6)),
+        const SizedBox(width: 6),
+        Expanded(
+          child: Text(
+            '由出库记录聚合，无关联销售单据',
+            style: TextStyle(
+                fontSize: 12,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.7),
+                fontStyle: FontStyle.italic),
+          ),
+        ),
+      ],
     );
   }
 }
+
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 
