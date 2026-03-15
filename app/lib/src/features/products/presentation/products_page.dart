@@ -298,20 +298,30 @@ class _ProductsPageState extends State<ProductsPage> {
                     keywordController: _keywordController,
                     barcodeController: _barcodeController,
                     busy: busy,
-                    filterCategory: _filterCategory,
-                    categoryController: widget.categoryController,
                     onKeywordChanged: _onKeywordChanged,
                     onSearch: () => _loadProducts(page: 1),
                     onReset: _resetFilters,
                     onScanBarcode: _fillFilterBarcodeByCamera,
-                    onPickCategory: _pickFilterCategory,
-                    onClearCategory: () {
-                      setState(() => _filterCategory = null);
-                      _loadProducts(page: 1);
-                    },
                   ),
                   secondChild: const SizedBox.shrink(),
                 ),
+                const SizedBox(height: 10),
+
+                // ── 分类 Chip 栏（常驻）────────────────────────────────
+                if (widget.categoryController != null)
+                  AnimatedBuilder(
+                    animation: widget.categoryController!,
+                    builder: (_, __) => _CategoryChipBar(
+                      controller: widget.categoryController!,
+                      selected: _filterCategory,
+                      busy: busy,
+                      onSelect: (CategoryNode? node) {
+                        setState(() => _filterCategory = node);
+                        _loadProducts(page: 1);
+                      },
+                      onManage: _pickFilterCategory,
+                    ),
+                  ),
                 const SizedBox(height: 10),
 
                 // ── 商品列表 ────────────────────────────────────────────
@@ -470,35 +480,22 @@ class _FilterCard extends StatelessWidget {
     required this.keywordController,
     required this.barcodeController,
     required this.busy,
-    required this.filterCategory,
-    required this.categoryController,
     required this.onKeywordChanged,
     required this.onSearch,
     required this.onReset,
     required this.onScanBarcode,
-    required this.onPickCategory,
-    required this.onClearCategory,
   });
 
   final TextEditingController keywordController;
   final TextEditingController barcodeController;
   final bool busy;
-  final CategoryNode? filterCategory;
-  final CategoryController? categoryController;
   final ValueChanged<String> onKeywordChanged;
   final VoidCallback onSearch;
   final VoidCallback onReset;
   final VoidCallback onScanBarcode;
-  final VoidCallback onPickCategory;
-  final VoidCallback onClearCategory;
 
   @override
   Widget build(BuildContext context) {
-    final String catLabel = filterCategory != null && categoryController != null
-        ? (categoryController!.buildPath(filterCategory!.id) ??
-            filterCategory!.name)
-        : '全部分类';
-
     return SectionCard(
       title: '商品搜索',
       child: Column(
@@ -537,41 +534,6 @@ class _FilterCard extends StatelessWidget {
               ),
             ),
           ),
-
-          // 分类筛选
-          if (categoryController != null) ...<Widget>[
-            const SizedBox(height: 8),
-            InkWell(
-              onTap: busy ? null : onPickCategory,
-              borderRadius: BorderRadius.circular(8),
-              child: InputDecorator(
-                decoration: InputDecoration(
-                  labelText: '分类筛选',
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                  prefixIcon:
-                      const Icon(Icons.category_outlined, size: 18),
-                  suffixIcon: filterCategory != null
-                      ? IconButton(
-                          icon: const Icon(Icons.close, size: 18),
-                          onPressed: busy ? null : onClearCategory,
-                          tooltip: '清除分类筛选',
-                        )
-                      : const Icon(Icons.expand_more, size: 18),
-                ),
-                child: Text(
-                  catLabel,
-                  style: TextStyle(
-                    fontSize: 14,
-                    color: filterCategory != null
-                        ? Theme.of(context).colorScheme.onSurface
-                        : Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ),
-            ),
-          ],
-
           const SizedBox(height: 10),
           Row(
             children: <Widget>[
@@ -780,6 +742,214 @@ class _ProductCard extends StatelessWidget {
                 ],
               ),
             ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// _CategoryChipBar — 横向滚动分类 Chip 栏（常驻，三级联动）
+// ════════════════════════════════════════════════════════════════════════════
+
+class _CategoryChipBar extends StatelessWidget {
+  const _CategoryChipBar({
+    required this.controller,
+    required this.selected,
+    required this.busy,
+    required this.onSelect,
+    required this.onManage,
+  });
+
+  final CategoryController controller;
+  final CategoryNode? selected;
+  final bool busy;
+  final ValueChanged<CategoryNode?> onSelect;
+  final VoidCallback onManage;
+
+  /// 找到 selected 所在的 L1/L2 祖先
+  (CategoryNode? l1, CategoryNode? l2) _resolveAncestors() {
+    if (selected == null) return (null, null);
+    final List<CategoryNode> l1s = controller.tree;
+    for (final CategoryNode l1 in l1s) {
+      if (l1.id == selected!.id) return (l1, null);
+      for (final CategoryNode l2 in l1.children) {
+        if (l2.id == selected!.id) return (l1, l2);
+        for (final CategoryNode l3 in l2.children) {
+          if (l3.id == selected!.id) return (l1, l2);
+        }
+      }
+    }
+    return (null, null);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme cs = Theme.of(context).colorScheme;
+    final List<CategoryNode> l1s = controller.tree;
+    if (l1s.isEmpty) return const SizedBox.shrink();
+
+    final (CategoryNode? activeL1, CategoryNode? activeL2) = _resolveAncestors();
+    final List<CategoryNode> l2s = activeL1?.children ?? const [];
+    final List<CategoryNode> l3s = activeL2?.children ?? const [];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        // ── 第一行：大类 ──────────────────────────────────────────────
+        SizedBox(
+          height: 36,
+          child: ListView(
+            scrollDirection: Axis.horizontal,
+            children: <Widget>[
+              // 「全部」chip
+              _ChipItem(
+                label: '全部',
+                selected: selected == null,
+                onTap: busy ? null : () => onSelect(null),
+                cs: cs,
+              ),
+              ...l1s.map((CategoryNode n) => _ChipItem(
+                label: n.name,
+                selected: activeL1?.id == n.id,
+                onTap: busy ? null : () {
+                  // 点同一个 L1 取消
+                  if (activeL1?.id == n.id) {
+                    onSelect(null);
+                  } else {
+                    // 有子类就只展开，没有子类立即筛选
+                    onSelect(n);
+                  }
+                },
+                cs: cs,
+              )),
+              // 「管理」入口
+              Padding(
+                padding: const EdgeInsets.only(left: 4),
+                child: InkWell(
+                  onTap: busy ? null : onManage,
+                  borderRadius: BorderRadius.circular(999),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: cs.outlineVariant),
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Icon(Icons.settings_outlined, size: 14,
+                        color: cs.onSurfaceVariant),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+        // ── 第二行：中类 ──────────────────────────────────────────────
+        if (l2s.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 33,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: <Widget>[
+                _ChipItem(
+                  label: '全部${activeL1!.name}',
+                  selected: selected?.id == activeL1.id,
+                  onTap: busy ? null : () => onSelect(activeL1),
+                  cs: cs,
+                  small: true,
+                ),
+                ...l2s.map((CategoryNode n) => _ChipItem(
+                  label: n.name,
+                  selected: activeL2?.id == n.id,
+                  onTap: busy ? null : () {
+                    if (activeL2?.id == n.id) {
+                      // 点同一个 L2 退回 L1
+                      onSelect(activeL1);
+                    } else {
+                      onSelect(n);
+                    }
+                  },
+                  cs: cs,
+                  small: true,
+                )),
+              ],
+            ),
+          ),
+        ],
+        // ── 第三行：小类 ──────────────────────────────────────────────
+        if (l3s.isNotEmpty) ...<Widget>[
+          const SizedBox(height: 6),
+          SizedBox(
+            height: 33,
+            child: ListView(
+              scrollDirection: Axis.horizontal,
+              children: <Widget>[
+                _ChipItem(
+                  label: '全部${activeL2!.name}',
+                  selected: selected?.id == activeL2.id,
+                  onTap: busy ? null : () => onSelect(activeL2),
+                  cs: cs,
+                  small: true,
+                ),
+                ...l3s.map((CategoryNode n) => _ChipItem(
+                  label: n.name,
+                  selected: selected?.id == n.id,
+                  onTap: busy ? null : () => onSelect(n),
+                  cs: cs,
+                  small: true,
+                )),
+              ],
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ChipItem extends StatelessWidget {
+  const _ChipItem({
+    required this.label,
+    required this.selected,
+    required this.onTap,
+    required this.cs,
+    this.small = false,
+  });
+
+  final String label;
+  final bool selected;
+  final VoidCallback? onTap;
+  final ColorScheme cs;
+  final bool small;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.only(right: 6),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(999),
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 180),
+          padding: EdgeInsets.symmetric(
+              horizontal: small ? 10 : 12, vertical: small ? 5 : 7),
+          decoration: BoxDecoration(
+            color: selected
+                ? cs.primary
+                : cs.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(999),
+            border: selected
+                ? null
+                : Border.all(color: cs.outlineVariant),
+          ),
+          child: Text(
+            label,
+            style: TextStyle(
+              fontSize: small ? 11 : 12,
+              fontWeight: FontWeight.w600,
+              color: selected ? cs.onPrimary : cs.onSurfaceVariant,
+            ),
           ),
         ),
       ),
