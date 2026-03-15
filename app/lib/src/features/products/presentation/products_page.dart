@@ -13,6 +13,7 @@ import '../models/product_models.dart';
 import 'batch_management_page.dart';
 import 'category_management_page.dart';
 import 'create_product_sheet.dart';
+import 'product_detail_page.dart';
 import 'products_edit_page.dart';
 
 
@@ -333,22 +334,21 @@ class _ProductsPageState extends State<ProductsPage> {
                         canWrite: canWrite,
                         busy: busy,
                         categoryController: widget.categoryController,
-                        onEdit: () => _openEditPage(p),
-                        onDelete: () => _deleteProduct(p),
-                        onStockCheck: widget.onStockCheck != null
-                            ? () => widget.onStockCheck!(p.id)
-                            : null,
-                        onBatchManage: widget.batchController != null
-                            ? () => Navigator.of(context).push(
-                                  MaterialPageRoute<void>(
-                                    builder: (_) => BatchManagementPage(
-                                      productId: p.id,
-                                      productName: p.name,
-                                      controller: widget.batchController!,
-                                    ),
-                                  ),
-                                )
-                            : null,
+                        onTap: () async {
+                          final bool? changed =
+                              await Navigator.of(context).push<bool>(
+                            MaterialPageRoute<bool>(
+                              builder: (_) => ProductDetailPage(
+                                product: p,
+                                controller: widget.controller,
+                                categoryController: widget.categoryController,
+                                batchController: widget.batchController,
+                                onStockCheck: widget.onStockCheck,
+                              ),
+                            ),
+                          );
+                          if (changed == true) _loadProducts(page: widget.controller.page);
+                        },
                       ),
                     ),
                   ),
@@ -595,7 +595,7 @@ class _FilterCard extends StatelessWidget {
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// _ProductCard
+// _ProductCard — 轻量卡片，点击跳转详情页
 // ════════════════════════════════════════════════════════════════════════════
 
 class _ProductCard extends StatelessWidget {
@@ -605,10 +605,7 @@ class _ProductCard extends StatelessWidget {
     required this.canWrite,
     required this.busy,
     required this.categoryController,
-    required this.onEdit,
-    required this.onDelete,
-    this.onStockCheck,
-    this.onBatchManage,
+    required this.onTap,
   });
 
   final ProductData product;
@@ -616,27 +613,19 @@ class _ProductCard extends StatelessWidget {
   final bool canWrite;
   final bool busy;
   final CategoryController? categoryController;
-  final VoidCallback onEdit;
-  final VoidCallback onDelete;
-  final VoidCallback? onStockCheck;
-  final VoidCallback? onBatchManage;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme cs = Theme.of(context).colorScheme;
-
-    // 使用 extension 计算属性
     final bool isLow = product.isLowStock;
     final double progress = product.stockProgress;
     final String? margin = canViewCostPrice ? product.grossMarginStr : null;
-
     final Color stockBarColor = progress < 0.3
         ? cs.error
         : progress < 0.6
             ? const Color(0xFFF59E0B)
             : const Color(0xFF10B981);
-
-    // 分类路径
     final String? catPath = categoryController != null && product.categoryId != null
         ? categoryController!.buildPath(product.categoryId)
         : null;
@@ -646,336 +635,150 @@ class _ProductCard extends StatelessWidget {
         color: cs.surface,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(
-          color: isLow
-              ? cs.error.withValues(alpha: 0.35)
-              : cs.outlineVariant,
+          color: isLow ? cs.error.withValues(alpha: 0.35) : cs.outlineVariant,
         ),
         boxShadow: <BoxShadow>[
           BoxShadow(
             color: Colors.black.withValues(alpha: 0.04),
-            blurRadius: 10,
+            blurRadius: 8,
             offset: const Offset(0, 3),
           ),
         ],
       ),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: canWrite ? null : onEdit,
+        onTap: busy ? null : onTap,
         child: Padding(
           padding: const EdgeInsets.all(14),
-          child: Column(
+          child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-
-              // ── Row 1: 商品名 + 库存徽章 ──────────────────────────────
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: <Widget>[
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          product.name,
-                          style: const TextStyle(
-                            fontWeight: FontWeight.w800,
-                            fontSize: 15,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                          maxLines: 2,
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          'SKU：${product.sku.isEmpty ? '-' : product.sku}',
-                          style: TextStyle(
-                              fontSize: 11, color: cs.onSurfaceVariant),
-                        ),
-                        // 分类路径
-                        if (catPath != null) ...<Widget>[
-                          const SizedBox(height: 2),
-                          Row(
-                            children: <Widget>[
-                              Icon(Icons.category_outlined,
-                                  size: 11, color: cs.primary),
-                              const SizedBox(width: 3),
-                              Expanded(
-                                child: Text(
-                                  catPath,
-                                  style: TextStyle(
-                                    fontSize: 11,
-                                    color: cs.primary,
-                                    fontWeight: FontWeight.w500,
-                                  ),
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ],
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 10),
-                  // 库存徽章
-                  Column(
-                    crossAxisAlignment: CrossAxisAlignment.end,
-                    children: <Widget>[
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 10, vertical: 4),
-                        decoration: BoxDecoration(
-                          color: isLow
-                              ? cs.error.withValues(alpha: 0.12)
-                              : const Color(0xFF10B981).withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(999),
-                          border: Border.all(
-                            color: isLow
-                                ? cs.error.withValues(alpha: 0.4)
-                                : const Color(0xFF10B981)
-                                    .withValues(alpha: 0.4),
-                          ),
-                        ),
-                        child: Text(
-                          isLow
-                              ? '库存 ${product.currentStock} / 需 ${product.minStockLimit}'
-                              : '库存 ${product.currentStock}',
-                          style: TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: isLow
-                                ? cs.error
-                                : const Color(0xFF059669),
-                          ),
-                        ),
-                      ),
-                      if (isLow) ...<Widget>[
-                        const SizedBox(height: 3),
-                        Text(
-                          '差 ${product.shortage} 件',
-                          style: TextStyle(
-                              fontSize: 10,
-                              color: cs.error,
-                              fontWeight: FontWeight.w600),
-                        ),
-                      ],
-                      const SizedBox(height: 4),
-                      SizedBox(
-                        width: 72,
-                        child: ClipRRect(
-                          borderRadius: BorderRadius.circular(3),
-                          child: LinearProgressIndicator(
-                            value: progress,
-                            minHeight: 5,
-                            backgroundColor: cs.surfaceContainerHighest,
-                            valueColor: AlwaysStoppedAnimation<Color>(
-                                stockBarColor),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-
-              const SizedBox(height: 10),
-
-              // ── Row 2: 条码 + 单位 ────────────────────────────────────
-              Row(
-                children: <Widget>[
-                  Icon(Icons.qr_code, size: 13, color: cs.onSurfaceVariant),
-                  const SizedBox(width: 4),
-                  Expanded(
-                    child: Text(
-                      product.barcode.isEmpty ? '-' : product.barcode,
-                      style:
-                          TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+              // 左：商品信息
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      product.name,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w800, fontSize: 15),
                       overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
                     ),
-                  ),
-                  const SizedBox(width: 8),
-                  Icon(Icons.straighten,
-                      size: 13, color: cs.onSurfaceVariant),
-                  const SizedBox(width: 4),
-                  Text(
-                    '单位：${product.unit}',
-                    style:
-                        TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 10),
-
-              // ── Row 3: 价格区 ─────────────────────────────────────────
-              Container(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-                decoration: BoxDecoration(
-                  color: cs.surfaceContainerHighest.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Row(
-                  children: <Widget>[
-                    // 零售价
-                    Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text('零售价',
-                            style: TextStyle(
-                                fontSize: 10, color: cs.onSurfaceVariant)),
-                        Text(
-                          '¥${product.retailPrice}',
-                          style: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
-                            color: Color(0xFF3B82F6),
-                            letterSpacing: -0.3,
-                          ),
-                        ),
-                      ],
+                    const SizedBox(height: 3),
+                    Text(
+                      'SKU：${product.sku.isEmpty ? '-' : product.sku}',
+                      style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
                     ),
-                    if (canViewCostPrice && product.costPrice != null) ...[
-                      const SizedBox(width: 12),
-                      Container(
-                          width: 1,
-                          height: 28,
-                          color: cs.outlineVariant.withValues(alpha: 0.5)),
-                      const SizedBox(width: 12),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: <Widget>[
-                          Text('均摊成本',
+                    if (catPath != null) ...<Widget>[
+                      const SizedBox(height: 2),
+                      Row(children: <Widget>[
+                        Icon(Icons.category_outlined, size: 11, color: cs.primary),
+                        const SizedBox(width: 3),
+                        Expanded(
+                          child: Text(catPath,
                               style: TextStyle(
-                                  fontSize: 10, color: cs.onSurfaceVariant)),
-                          Text(
-                            '¥${product.costPrice}',
-                            style: TextStyle(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w700,
-                              color: cs.onSurface,
-                            ),
-                          ),
-                        ],
+                                  fontSize: 11,
+                                  color: cs.primary,
+                                  fontWeight: FontWeight.w500),
+                              overflow: TextOverflow.ellipsis),
+                        ),
+                      ]),
+                    ],
+                    const SizedBox(height: 8),
+                    // 价格行
+                    Row(children: <Widget>[
+                      Text(
+                        '¥${product.retailPrice}',
+                        style: const TextStyle(
+                          fontSize: 16,
+                          fontWeight: FontWeight.w800,
+                          color: Color(0xFF3B82F6),
+                          letterSpacing: -0.3,
+                        ),
                       ),
-                      if (product.lastInboundUnitCost != null) ...[
-                        const SizedBox(width: 12),
+                      if (margin != null) ...<Widget>[
+                        const SizedBox(width: 8),
                         Container(
-                            width: 1,
-                            height: 28,
-                            color: cs.outlineVariant.withValues(alpha: 0.5)),
-                        const SizedBox(width: 12),
-                        Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: <Widget>[
-                            Text('最近进货',
-                                style: TextStyle(
-                                    fontSize: 10, color: cs.onSurfaceVariant)),
-                            Text(
-                              '¥${product.lastInboundUnitCost}',
-                              style: TextStyle(
-                                fontSize: 13,
-                                fontWeight: FontWeight.w600,
-                                color: cs.onSurfaceVariant,
-                              ),
+                          padding: const EdgeInsets.symmetric(
+                              horizontal: 6, vertical: 2),
+                          decoration: BoxDecoration(
+                            color: const Color(0xFF10B981).withValues(alpha: 0.1),
+                            borderRadius: BorderRadius.circular(6),
+                          ),
+                          child: Text(
+                            '毛利 $margin',
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w700,
+                              color: Color(0xFF059669),
                             ),
-                          ],
-                        ),
-                      ],
-                    ],
-                    if (margin != null) ...<Widget>[
-                      const Spacer(),
-                      Container(
-                        padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 3),
-                        decoration: BoxDecoration(
-                          color: const Color(0xFF10B981).withValues(alpha: 0.12),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: Text(
-                          '📈 毛利 $margin',
-                          style: const TextStyle(
-                            fontSize: 11,
-                            fontWeight: FontWeight.w700,
-                            color: Color(0xFF059669),
                           ),
                         ),
-                      ),
-                    ],
+                      ],
+                    ]),
                   ],
                 ),
               ),
-              const SizedBox(height: 10),
-
-              // ── Row 4: 元数据 ─────────────────────────────────────────
-              Row(
+              const SizedBox(width: 12),
+              // 右：库存徽章 + 进度条 + 箭头
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
                 children: <Widget>[
-                  Icon(Icons.warning_amber_rounded,
-                      size: 12, color: cs.onSurfaceVariant),
-                  const SizedBox(width: 3),
-                  Text(
-                    '预警 ${product.minStockLimit} 件',
-                    style:
-                        TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                  Container(
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 8, vertical: 4),
+                    decoration: BoxDecoration(
+                      color: isLow
+                          ? cs.error.withValues(alpha: 0.12)
+                          : const Color(0xFF10B981).withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(999),
+                      border: Border.all(
+                        color: isLow
+                            ? cs.error.withValues(alpha: 0.4)
+                            : const Color(0xFF10B981).withValues(alpha: 0.4),
+                      ),
+                    ),
+                    child: Text(
+                      isLow
+                          ? '${product.currentStock}/${product.minStockLimit}'
+                          : '库存 ${product.currentStock}',
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.w700,
+                        color: isLow ? cs.error : const Color(0xFF059669),
+                      ),
+                    ),
                   ),
+                  const SizedBox(height: 6),
+                  SizedBox(
+                    width: 64,
+                    child: ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        minHeight: 5,
+                        backgroundColor: cs.surfaceContainerHighest,
+                        valueColor:
+                            AlwaysStoppedAnimation<Color>(stockBarColor),
+                      ),
+                    ),
+                  ),
+                  if (isLow) ...<Widget>[
+                    const SizedBox(height: 4),
+                    Text(
+                      '差 ${product.shortage} 件',
+                      style: TextStyle(
+                          fontSize: 10,
+                          color: cs.error,
+                          fontWeight: FontWeight.w600),
+                    ),
+                  ],
+                  const SizedBox(height: 6),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 18, color: cs.onSurfaceVariant),
                 ],
               ),
-              const SizedBox(height: 10),
-
-              // ── Row 5: 操作按钮 ───────────────────────────────────────
-              if (canWrite)
-                Row(
-                  children: <Widget>[
-                    OutlinedButton.icon(
-                      onPressed: busy ? null : onEdit,
-                      icon: const Icon(Icons.edit_outlined, size: 16),
-                      label: const Text('编辑'),
-                    ),
-                    const SizedBox(width: 8),
-                    if (onStockCheck != null) ...<Widget>[
-                      OutlinedButton.icon(
-                        onPressed: busy ? null : onStockCheck,
-                        icon: const Icon(
-                            Icons.playlist_add_check_rounded,
-                            size: 16),
-                        label: const Text('盘点'),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    if (onBatchManage != null) ...<Widget>[
-                      OutlinedButton.icon(
-                        onPressed: busy ? null : onBatchManage,
-                        icon: const Icon(Icons.inventory_2_outlined, size: 16),
-                        label: const Text('批次'),
-                      ),
-                      const SizedBox(width: 8),
-                    ],
-                    TextButton.icon(
-                      onPressed: busy ? null : onDelete,
-                      style: TextButton.styleFrom(
-                        foregroundColor: cs.error,
-                      ),
-                      icon: const Icon(Icons.delete_outline, size: 16),
-                      label: const Text('删除'),
-                    ),
-                  ],
-                )
-              else
-                Row(
-                  children: <Widget>[
-                    OutlinedButton.icon(
-                      onPressed: onEdit,
-                      icon: const Icon(Icons.visibility_outlined, size: 16),
-                      label: const Text('查看详情'),
-                    ),
-                    if (onBatchManage != null) ...<Widget>[
-                      const SizedBox(width: 8),
-                      OutlinedButton.icon(
-                        onPressed: onBatchManage,
-                        icon: const Icon(Icons.inventory_2_outlined, size: 16),
-                        label: const Text('批次'),
-                      ),
-                    ],
-                  ],
-                ),
             ],
           ),
         ),
