@@ -8,6 +8,7 @@ pub mod products;
 pub mod purchase_orders;
 pub mod reports;
 pub mod sales_orders;
+pub mod serials;
 pub mod stock_checks;
 pub mod suppliers;
 pub mod users;
@@ -42,6 +43,10 @@ pub fn protected_routes() -> Router<AppState> {
             "/users/:id/reset-password",
             post(users::reset_user_password),
         )
+        // 序列号
+        .route("/serials/inbound", post(serials::serial_inbound))
+        .route("/serials/outbound", post(serials::serial_outbound))
+        .route("/serials", get(serials::query_serials))
         .route("/products/scan", get(products::scan_product))
         .route(
             "/products/barcode-lookup",

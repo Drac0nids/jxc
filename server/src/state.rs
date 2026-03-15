@@ -66,6 +66,7 @@ impl AppState {
             is_deleted: false,
             category_id: None,
             track_batches: false,
+track_serials: false,
         };
 
         let mut users = HashMap::new();

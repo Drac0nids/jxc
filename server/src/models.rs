@@ -69,6 +69,45 @@ pub struct Product {
     pub is_deleted: bool,
     pub category_id: Option<i64>,
     pub track_batches: bool,
+    pub track_serials: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum SerialStatus {
+    InStock,
+    Sold,
+    Returned,
+}
+
+impl SerialStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::InStock  => "IN_STOCK",
+            Self::Sold     => "SOLD",
+            Self::Returned => "RETURNED",
+        }
+    }
+    pub fn from_str(s: &str) -> Self {
+        match s {
+            "SOLD"     => Self::Sold,
+            "RETURNED" => Self::Returned,
+            _          => Self::InStock,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SerialNumber {
+    pub id:              Uuid,
+    pub tenant_id:      Uuid,
+    pub sn:             String,
+    pub product_id:     i64,
+    pub batch_id:       Option<Uuid>,
+    pub status:         String,
+    pub unit_cost:      Option<Decimal>,
+    pub sell_price:     Option<Decimal>,
+    pub inbound_biz_no:  Option<String>,
+    pub outbound_biz_no: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -583,6 +583,7 @@ pub async fn create_product(
             is_deleted: false,
             category_id: req.category_id,
             track_batches: req.track_batches.unwrap_or(false),
+            track_serials: req.track_serials.unwrap_or(false),
         };
 
         state.repository.create_product(pool, &product).await?;
@@ -664,6 +665,7 @@ pub async fn create_product(
         is_deleted: false,
         category_id: None, // 内存模式不支持分类
         track_batches: false,
+        track_serials: false,
     };
 
     products.insert(product.id, product.clone());
@@ -825,6 +827,7 @@ pub async fn update_product(
             is_deleted: existing.is_deleted,
             category_id: req.category_id.or(existing.category_id),
             track_batches: req.track_batches.unwrap_or(existing.track_batches),
+            track_serials: req.track_serials.unwrap_or(existing.track_serials),
         };
 
         state
@@ -908,6 +911,9 @@ pub async fn update_product(
     product.min_stock_limit = new_min_stock_limit;
     if let Some(tb) = req.track_batches {
         product.track_batches = tb;
+    }
+    if let Some(ts) = req.track_serials {
+        product.track_serials = ts;
     }
     let updated = product.clone();
 

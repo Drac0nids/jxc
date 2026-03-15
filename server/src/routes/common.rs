@@ -107,6 +107,7 @@ pub struct ProductData {
     pub min_stock_limit: i32,
     pub category_id: Option<i64>,
     pub track_batches: bool,
+    pub track_serials: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -121,6 +122,7 @@ pub struct CreateProductRequest {
     pub cost_price: String,
     pub category_id: Option<i64>,
     pub track_batches: Option<bool>,
+    pub track_serials: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -134,6 +136,7 @@ pub struct UpdateProductRequest {
     pub expected_version: Option<i32>,
     pub category_id: Option<i64>,
     pub track_batches: Option<bool>,
+    pub track_serials: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -777,6 +780,7 @@ pub fn to_product_data(product: &Product, hide_cost_price: bool) -> ProductData 
         min_stock_limit: product.min_stock_limit,
         category_id: product.category_id,
         track_batches: product.track_batches,
+        track_serials: product.track_serials,
     }
 }
 

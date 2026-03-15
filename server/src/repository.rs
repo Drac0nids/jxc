@@ -14,6 +14,7 @@ use crate::{
         AuditLog, BarcodeLookupCache, BarcodeLookupStatus, Category, Product, ProductBatch,
         PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus, SalesOrder, SalesOrderItem,
         SalesOrderStatus, StockCheck, StockCheckItem, StockCheckStatus, StockLog, Supplier, User, UserRole,
+        SerialNumber,
     },
 };
 
@@ -162,6 +163,69 @@ impl RepositoryProvider {
         match self {
             Self::Postgres(repo) => repo.delete_user(pool, tenant_id, user_id).await,
             Self::Memory(_) => Err(unsupported_operation("delete_user")),
+        }
+    }
+
+    // ── Serial Numbers ────────────────────────────────────────────────────────
+
+    pub async fn serial_inbound(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        product_id: i64,
+        batch_id: Option<Uuid>,
+        unit_cost: Option<Decimal>,
+        inbound_biz_no: &str,
+        sns: &[String],
+    ) -> Result<(), AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.serial_inbound(pool, tenant_id, product_id, batch_id, unit_cost, inbound_biz_no, sns).await
+            }
+            Self::Memory(_) => Err(unsupported_operation("serial_inbound")),
+        }
+    }
+
+    pub async fn serial_outbound(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        outbound_biz_no: &str,
+        sell_price: Option<Decimal>,
+        sns: &[String],
+    ) -> Result<Vec<SerialNumber>, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.serial_outbound(pool, tenant_id, outbound_biz_no, sell_price, sns).await
+            }
+            Self::Memory(_) => Err(unsupported_operation("serial_outbound")),
+        }
+    }
+
+    pub async fn list_serials_by_product(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        product_id: i64,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<SerialNumber>, AppError> {
+        match self {
+            Self::Postgres(repo) => {
+                repo.list_serials_by_product(pool, tenant_id, product_id, status_filter).await
+            }
+            Self::Memory(_) => Ok(vec![]),
+        }
+    }
+
+    pub async fn find_serial_by_sn(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        sn: &str,
+    ) -> Result<Option<SerialNumber>, AppError> {
+        match self {
+            Self::Postgres(repo) => repo.find_serial_by_sn(pool, tenant_id, sn).await,
+            Self::Memory(_) => Ok(None),
         }
     }
 
@@ -1354,7 +1418,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted, category_id, track_batches
+                       min_stock_limit, version, is_deleted, category_id, track_batches, track_serials
                 FROM products
                 WHERE tenant_id = $1 AND barcode = $2
                 LIMIT 1
@@ -1370,7 +1434,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted, category_id, track_batches
+                       min_stock_limit, version, is_deleted, category_id, track_batches, track_serials
                 FROM products
                 WHERE tenant_id = $1 AND barcode = $2 AND is_deleted = FALSE
                 LIMIT 1
@@ -1481,7 +1545,7 @@ impl PostgresRepository {
             r#"
             SELECT id, tenant_id, sku, barcode, name, unit,
                    current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                   min_stock_limit, version, is_deleted, category_id, track_batches
+                   min_stock_limit, version, is_deleted, category_id, track_batches, track_serials
             FROM products
             WHERE tenant_id = $1 AND is_deleted = FALSE
             ORDER BY id ASC
@@ -1505,7 +1569,7 @@ impl PostgresRepository {
             r#"
             SELECT id, tenant_id, sku, barcode, name, unit,
                    current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                   min_stock_limit, version, is_deleted, category_id, track_batches
+                   min_stock_limit, version, is_deleted, category_id, track_batches, track_serials
             FROM products
             WHERE tenant_id = $1
             ORDER BY id ASC
@@ -1903,7 +1967,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted, category_id, track_batches
+                       min_stock_limit, version, is_deleted, category_id, track_batches, track_serials
                 FROM products
                 WHERE tenant_id = $1 AND id = $2
                 LIMIT 1
@@ -1919,7 +1983,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted, category_id, track_batches
+                       min_stock_limit, version, is_deleted, category_id, track_batches, track_serials
                 FROM products
                 WHERE tenant_id = $1 AND id = $2 AND is_deleted = FALSE
                 LIMIT 1
@@ -2055,12 +2119,12 @@ impl PostgresRepository {
             INSERT INTO products (
                 id, tenant_id, sku, barcode, name, unit,
                 current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                min_stock_limit, version, is_deleted, category_id, track_batches, created_at, updated_at
+                min_stock_limit, version, is_deleted, category_id, track_batches, track_serials, created_at, updated_at
             )
             VALUES (
                 $1, $2, $3, $4, $5, $6,
                 $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, NOW(), NOW()
+                $11, $12, $13, $14, $15, $16, NOW(), NOW()
             )
             "#,
         )
@@ -2078,6 +2142,7 @@ impl PostgresRepository {
         .bind(product.is_deleted)
         .bind(product.category_id)
         .bind(product.track_batches)
+        .bind(product.track_serials)
         .execute(pool)
         .await
         .map_err(|err| map_sqlx_error("创建商品失败", err))?;
@@ -2106,9 +2171,10 @@ impl PostgresRepository {
                 is_deleted = $10,
                 category_id = $11,
                 track_batches = $12,
+                track_serials = $13,
                 updated_at = NOW()
-            WHERE id = $13
-              AND tenant_id = $14
+            WHERE id = $14
+              AND tenant_id = $15
             "#,
         )
         .bind(&product.sku)
@@ -2123,6 +2189,7 @@ impl PostgresRepository {
         .bind(product.is_deleted)
         .bind(product.category_id)
         .bind(product.track_batches)
+        .bind(product.track_serials)
         .bind(product.id)
         .bind(product.tenant_id)
         .execute(pool)
@@ -2162,7 +2229,7 @@ impl PostgresRepository {
             r#"
             SELECT id, tenant_id, sku, barcode, name, unit,
                    current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                   min_stock_limit, version, is_deleted, category_id, track_batches
+                   min_stock_limit, version, is_deleted, category_id, track_batches, track_serials
             FROM products
             WHERE tenant_id = $1 AND id = $2
             FOR UPDATE
@@ -2282,7 +2349,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted, category_id, track_batches
+                       min_stock_limit, version, is_deleted, category_id, track_batches, track_serials
                 FROM products
                 WHERE tenant_id = $1 AND id = $2
                 FOR UPDATE
@@ -2407,7 +2474,7 @@ impl PostgresRepository {
                 r#"
                 SELECT id, tenant_id, sku, barcode, name, unit,
                        current_stock, cost_price, retail_price, last_inbound_unit_cost,
-                       min_stock_limit, version, is_deleted, category_id, track_batches
+                       min_stock_limit, version, is_deleted, category_id, track_batches, track_serials
                 FROM products
                 WHERE tenant_id = $1 AND id = $2
                 FOR UPDATE
@@ -4852,6 +4919,9 @@ fn map_product_row(row: sqlx::postgres::PgRow) -> Result<Product, AppError> {
         track_batches: row
             .try_get("track_batches")
             .map_err(|err| map_sqlx_error("读取批次追踪标记失败", err))?,
+        track_serials: row
+            .try_get("track_serials")
+            .map_err(|err| map_sqlx_error("读取序列号追踪标记失败", err))?,
     })
 }
 
@@ -5551,6 +5621,250 @@ fn is_sql_state(err: &sqlx::Error, sql_state: &str) -> bool {
     }
 }
 
+// ── Serial Numbers impl ───────────────────────────────────────────────────────
+
+impl PostgresRepository {
+    /// 序列号入库：批量写入 serial_numbers + current_stock += sns.len()
+    /// 同一租户内 SN 必须唯一，重复会返回冲突错误
+    pub async fn serial_inbound(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        product_id: i64,
+        batch_id: Option<Uuid>,
+        unit_cost: Option<Decimal>,
+        inbound_biz_no: &str,
+        sns: &[String],
+    ) -> Result<(), AppError> {
+        let pool = require_pool(pool)?;
+        if sns.is_empty() {
+            return Err(AppError::bad_request("序列号列表不能为空"));
+        }
+
+        let mut tx = pool.begin().await.map_err(|e| map_sqlx_error("开启事务失败", e))?;
+
+        // 检查是否有重复 SN（忽略 RETURNED 状态，允许退货后重新入库）
+        for sn in sns {
+            let exists: bool = sqlx::query_scalar(
+                r#"SELECT EXISTS(SELECT 1 FROM serial_numbers WHERE tenant_id=$1 AND sn=$2 AND status != 'RETURNED')"#,
+            )
+            .bind(tenant_id)
+            .bind(sn)
+            .fetch_one(&mut *tx)
+            .await
+            .map_err(|e| map_sqlx_error("检查序列号重复失败", e))?;
+
+            if exists {
+                return Err(AppError::conflict(4093, format!("序列号「{sn}」已在库，不能重复入库")));
+            }
+        }
+
+        // 批量插入 serial_numbers
+        for sn in sns {
+            sqlx::query(
+                r#"
+                INSERT INTO serial_numbers
+                    (tenant_id, sn, product_id, batch_id, status, unit_cost, inbound_biz_no)
+                VALUES ($1, $2, $3, $4, 'IN_STOCK', $5, $6)
+                ON CONFLICT (tenant_id, sn) DO UPDATE
+                    SET status = 'IN_STOCK',
+                        product_id = EXCLUDED.product_id,
+                        batch_id = EXCLUDED.batch_id,
+                        unit_cost = EXCLUDED.unit_cost,
+                        inbound_biz_no = EXCLUDED.inbound_biz_no,
+                        outbound_biz_no = NULL,
+                        updated_at = NOW()
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(sn)
+            .bind(product_id)
+            .bind(batch_id)
+            .bind(unit_cost)
+            .bind(inbound_biz_no)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| map_sqlx_error("写入序列号失败", e))?;
+        }
+
+        // 更新 current_stock
+        let delta = sns.len() as i32;
+        sqlx::query(
+            r#"UPDATE products SET current_stock = current_stock + $1, updated_at = NOW()
+               WHERE id = $2 AND tenant_id = $3"#,
+        )
+        .bind(delta)
+        .bind(product_id)
+        .bind(tenant_id)
+        .execute(&mut *tx)
+        .await
+        .map_err(|e| map_sqlx_error("更新库存失败", e))?;
+
+        tx.commit().await.map_err(|e| map_sqlx_error("提交事务失败", e))?;
+        Ok(())
+    }
+
+    /// 序列号出库：校验 SN 在库，更新状态，current_stock -= sns.len()
+    pub async fn serial_outbound(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        outbound_biz_no: &str,
+        sell_price: Option<Decimal>,
+        sns: &[String],
+    ) -> Result<Vec<SerialNumber>, AppError> {
+        let pool = require_pool(pool)?;
+        if sns.is_empty() {
+            return Err(AppError::bad_request("序列号列表不能为空"));
+        }
+
+        let mut tx = pool.begin().await.map_err(|e| map_sqlx_error("开启事务失败", e))?;
+
+        let mut results = Vec::with_capacity(sns.len());
+        let mut product_deltas: std::collections::HashMap<i64, i32> = std::collections::HashMap::new();
+
+        for sn in sns {
+            // 查出该 SN，校验状态
+            let row = sqlx::query(
+                r#"SELECT id, tenant_id, sn, product_id, batch_id, status,
+                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no
+                   FROM serial_numbers WHERE tenant_id=$1 AND sn=$2"#,
+            )
+            .bind(tenant_id)
+            .bind(sn)
+            .fetch_optional(&mut *tx)
+            .await
+            .map_err(|e| map_sqlx_error("查询序列号失败", e))?;
+
+            let row = row.ok_or_else(|| {
+                AppError::not_found(format!("序列号「{sn}」不存在"))
+            })?;
+
+            let status: String = row.try_get("status").map_err(|e| map_sqlx_error("读取状态失败", e))?;
+            if status != "IN_STOCK" {
+                return Err(AppError::conflict(4094, format!("序列号「{sn}」当前状态为 {status}，不能出库")));
+            }
+
+            let product_id: i64 = row.try_get("product_id").map_err(|e| map_sqlx_error("读取商品ID失败", e))?;
+            *product_deltas.entry(product_id).or_insert(0) += 1;
+
+            // 更新状态
+            sqlx::query(
+                r#"UPDATE serial_numbers
+                   SET status='SOLD', sell_price=$1, outbound_biz_no=$2, updated_at=NOW()
+                   WHERE tenant_id=$3 AND sn=$4"#,
+            )
+            .bind(sell_price)
+            .bind(outbound_biz_no)
+            .bind(tenant_id)
+            .bind(sn)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| map_sqlx_error("更新序列号状态失败", e))?;
+
+            results.push(SerialNumber {
+                id: row.try_get("id").map_err(|e| map_sqlx_error("读取id失败", e))?,
+                tenant_id,
+                sn: sn.clone(),
+                product_id,
+                batch_id: row.try_get("batch_id").map_err(|e| map_sqlx_error("读取batch_id失败", e))?,
+                status: "SOLD".to_string(),
+                unit_cost: row.try_get("unit_cost").map_err(|e| map_sqlx_error("读取unit_cost失败", e))?,
+                sell_price,
+                inbound_biz_no: row.try_get("inbound_biz_no").map_err(|e| map_sqlx_error("读取inbound_biz_no失败", e))?,
+                outbound_biz_no: Some(outbound_biz_no.to_string()),
+            });
+        }
+
+        // 按商品扣减库存
+        for (product_id, delta) in &product_deltas {
+            sqlx::query(
+                r#"UPDATE products SET current_stock = current_stock - $1, updated_at = NOW()
+                   WHERE id = $2 AND tenant_id = $3"#,
+            )
+            .bind(*delta)
+            .bind(product_id)
+            .bind(tenant_id)
+            .execute(&mut *tx)
+            .await
+            .map_err(|e| map_sqlx_error("扣减库存失败", e))?;
+        }
+
+        tx.commit().await.map_err(|e| map_sqlx_error("提交事务失败", e))?;
+        Ok(results)
+    }
+
+    /// 查询商品的序列号列表，可按状态过滤
+    pub async fn list_serials_by_product(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        product_id: i64,
+        status_filter: Option<&str>,
+    ) -> Result<Vec<SerialNumber>, AppError> {
+        let pool = require_pool(pool)?;
+        let rows = if let Some(status) = status_filter {
+            sqlx::query(
+                r#"SELECT id, tenant_id, sn, product_id, batch_id, status,
+                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no
+                   FROM serial_numbers WHERE tenant_id=$1 AND product_id=$2 AND status=$3
+                   ORDER BY created_at DESC"#,
+            )
+            .bind(tenant_id).bind(product_id).bind(status)
+            .fetch_all(pool).await
+        } else {
+            sqlx::query(
+                r#"SELECT id, tenant_id, sn, product_id, batch_id, status,
+                          unit_cost, sell_price, inbound_biz_no, outbound_biz_no
+                   FROM serial_numbers WHERE tenant_id=$1 AND product_id=$2
+                   ORDER BY created_at DESC"#,
+            )
+            .bind(tenant_id).bind(product_id)
+            .fetch_all(pool).await
+        }
+        .map_err(|e| map_sqlx_error("查询序列号列表失败", e))?;
+
+        rows.iter().map(|row| Self::row_to_serial(row)).collect()
+    }
+
+    /// 按 SN 精确查询
+    pub async fn find_serial_by_sn(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        sn: &str,
+    ) -> Result<Option<SerialNumber>, AppError> {
+        let pool = require_pool(pool)?;
+        let row = sqlx::query(
+            r#"SELECT id, tenant_id, sn, product_id, batch_id, status,
+                      unit_cost, sell_price, inbound_biz_no, outbound_biz_no
+               FROM serial_numbers WHERE tenant_id=$1 AND sn=$2"#,
+        )
+        .bind(tenant_id)
+        .bind(sn)
+        .fetch_optional(pool)
+        .await
+        .map_err(|e| map_sqlx_error("查询序列号失败", e))?;
+
+        row.map(|r| Self::row_to_serial(&r)).transpose()
+    }
+
+    fn row_to_serial(row: &sqlx::postgres::PgRow) -> Result<SerialNumber, AppError> {
+        Ok(SerialNumber {
+            id:              row.try_get("id").map_err(|e| map_sqlx_error("id", e))?,
+            tenant_id:       row.try_get("tenant_id").map_err(|e| map_sqlx_error("tenant_id", e))?,
+            sn:              row.try_get("sn").map_err(|e| map_sqlx_error("sn", e))?,
+            product_id:      row.try_get("product_id").map_err(|e| map_sqlx_error("product_id", e))?,
+            batch_id:        row.try_get("batch_id").map_err(|e| map_sqlx_error("batch_id", e))?,
+            status:          row.try_get("status").map_err(|e| map_sqlx_error("status", e))?,
+            unit_cost:       row.try_get("unit_cost").map_err(|e| map_sqlx_error("unit_cost", e))?,
+            sell_price:      row.try_get("sell_price").map_err(|e| map_sqlx_error("sell_price", e))?,
+            inbound_biz_no:  row.try_get("inbound_biz_no").map_err(|e| map_sqlx_error("inbound_biz_no", e))?,
+            outbound_biz_no: row.try_get("outbound_biz_no").map_err(|e| map_sqlx_error("outbound_biz_no", e))?,
+        })
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use std::sync::atomic::{AtomicI64, Ordering};
@@ -5932,7 +6246,7 @@ mod tests {
 
     fn sample_product(tenant_id: Uuid, product_id: i64, _version: i32) -> Product {
         Product {
-            id: product_id, track_batches: false,
+            id: product_id, track_batches: false, track_serials: false,
             tenant_id,
             sku: format!("SKU-{product_id}"),
             barcode: format!("690{:09}", product_id % 1_000_000_000),
