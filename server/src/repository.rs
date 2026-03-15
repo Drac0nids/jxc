@@ -5643,7 +5643,8 @@ impl PostgresRepository {
 
         let mut tx = pool.begin().await.map_err(|e| map_sqlx_error("开启事务失败", e))?;
 
-        // 检查是否有重复 SN（忽略 RETURNED 状态，允许退货后重新入库）
+        // 先汇总所有重复 SN，一次性报错（忽略 RETURNED 状态，允许退货后重新入库）
+        let mut duplicates: Vec<String> = Vec::new();
         for sn in sns {
             let exists: bool = sqlx::query_scalar(
                 r#"SELECT EXISTS(SELECT 1 FROM serial_numbers WHERE tenant_id=$1 AND sn=$2 AND status != 'RETURNED')"#,
@@ -5655,8 +5656,15 @@ impl PostgresRepository {
             .map_err(|e| map_sqlx_error("检查序列号重复失败", e))?;
 
             if exists {
-                return Err(AppError::conflict(4093, format!("序列号「{sn}」已在库，不能重复入库")));
+                duplicates.push(sn.clone());
             }
+        }
+        if !duplicates.is_empty() {
+            let list = duplicates.join("、");
+            return Err(AppError::conflict(
+                4093,
+                format!("以下序列号已在库，不能重复入库：{list}"),
+            ));
         }
 
         // 批量插入 serial_numbers

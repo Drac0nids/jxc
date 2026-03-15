@@ -147,8 +147,28 @@ class _SerialInboundPageState extends State<SerialInboundPage> {
         _step = 3;
       });
     } catch (e) {
-      final msg = e.toString().replaceFirst('Exception: ', '');
-      setState(() => _submitResult = '❌ $msg');
+      final raw = e.toString().replaceFirst('Exception: ', '');
+      // 尝试解析后端返回的重复 SN 信息（code=4093 消息格式："序列号已存在: SN1, SN2"）
+      String friendly = raw;
+      if (raw.contains('已在库') || raw.contains('已存在') || raw.contains('duplicate')) {
+        friendly = '❌ $raw\n\n请从列表中撤销这些序列号后重新提交。';
+      } else {
+        friendly = '❌ 提交失败：$raw';
+      }
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(friendly, style: const TextStyle(fontSize: 13)),
+            backgroundColor: Theme.of(context).colorScheme.error,
+            duration: const Duration(seconds: 6),
+            action: SnackBarAction(
+              label: '知道了',
+              textColor: Colors.white,
+              onPressed: () {},
+            ),
+          ),
+        );
+      }
     } finally {
       setState(() => _submitting = false);
     }
