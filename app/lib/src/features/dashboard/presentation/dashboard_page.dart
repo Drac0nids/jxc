@@ -562,8 +562,8 @@ class _DashboardPageState extends State<DashboardPage>
           if (canInbound)
             const _QuickActionItem(
               type: _QuickActionType.serialInbound,
-              title: '序列号入库',
-              subtitle: '手机/设备逐台录入',
+              title: '逐码入库',
+              subtitle: '逐一扫码录入序列号',
               icon: Icons.qr_code_2_rounded,
               color: Color(0xFF0EA5E9),
               enabled: true,
@@ -571,8 +571,8 @@ class _DashboardPageState extends State<DashboardPage>
           if (canOutbound)
             const _QuickActionItem(
               type: _QuickActionType.serialOutbound,
-              title: '序列号出库',
-              subtitle: '扫 SN 直接出库',
+              title: '逐码出库',
+              subtitle: '逐一扫码出库',
               icon: Icons.document_scanner_rounded,
               color: Color(0xFFEC4899),
               enabled: true,
@@ -858,7 +858,7 @@ class _DashboardPageState extends State<DashboardPage>
                           ],
                         ),
                         const SizedBox(height: 10),
-                        // 序列号出库 / 入库（小卡片，挂靠在同一区域）
+                        // 逐码出库 / 入库（小卡片，挂靠在同一区域）
                         GridView.count(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
@@ -871,8 +871,8 @@ class _DashboardPageState extends State<DashboardPage>
                               _QuickActionCard(
                                 item: const _QuickActionItem(
                                   type: _QuickActionType.serialOutbound,
-                                  title: 'SN 出库',
-                                  subtitle: '扫序列号直接出库',
+                                  title: '逐码出库',
+                                  subtitle: '逐一扫码出库',
                                   icon: Icons.document_scanner_rounded,
                                   color: Color(0xFFEC4899),
                                   enabled: true,
@@ -884,8 +884,8 @@ class _DashboardPageState extends State<DashboardPage>
                               _QuickActionCard(
                                 item: const _QuickActionItem(
                                   type: _QuickActionType.serialInbound,
-                                  title: 'SN 入库',
-                                  subtitle: '逐台扫码绑定商品',
+                                  title: '逐码入库',
+                                  subtitle: '逐一扫码录入序列号',
                                   icon: Icons.qr_code_2_rounded,
                                   color: Color(0xFF0EA5E9),
                                   enabled: true,
