@@ -905,6 +905,49 @@ class _DashboardPageState extends State<DashboardPage>
                           ],
                         ),
                       ],
+
+                      // ── 序列号管理 ──────────────────────────────────
+                      if (canInbound || canOutbound) ...<Widget>[
+                        const SizedBox(height: 12),
+                        const _SectionTitle(label: '序列号管理'),
+                        const SizedBox(height: 8),
+                        GridView.count(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 1.9,
+                          children: <Widget>[
+                            if (canInbound)
+                              _QuickActionCard(
+                                item: const _QuickActionItem(
+                                  type: _QuickActionType.serialInbound,
+                                  title: '序列号入库',
+                                  subtitle: '手机/设备逐台录入',
+                                  icon: Icons.qr_code_2_rounded,
+                                  color: Color(0xFF0EA5E9),
+                                  enabled: true,
+                                ),
+                                onTap: () => _handleQuickActionTap(
+                                    _QuickActionType.serialInbound),
+                              ),
+                            if (canOutbound)
+                              _QuickActionCard(
+                                item: const _QuickActionItem(
+                                  type: _QuickActionType.serialOutbound,
+                                  title: '序列号出库',
+                                  subtitle: '扫 SN 自动识别出库',
+                                  icon: Icons.document_scanner_rounded,
+                                  color: Color(0xFFEC4899),
+                                  enabled: true,
+                                ),
+                                onTap: () => _handleQuickActionTap(
+                                    _QuickActionType.serialOutbound),
+                              ),
+                          ],
+                        ),
+                      ],
                     ],
                   ],
                 ),
