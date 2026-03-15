@@ -1825,14 +1825,14 @@ class _ScanToggleCardState extends State<_ScanToggleCard> {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   _ModeChip(
-                    label: '确认',
+                    label: '逐件扫',
                     selected: !_continuous,
                     color: color,
                     onTap: () => setState(() => _continuous = false),
                   ),
                   const SizedBox(width: 6),
                   _ModeChip(
-                    label: '连续',
+                    label: '批量扫',
                     selected: _continuous,
                     color: color,
                     onTap: () => setState(() => _continuous = true),
