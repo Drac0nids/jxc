@@ -617,9 +617,6 @@ class _DashboardPageState extends State<DashboardPage>
                     if (loading && expiring.isEmpty) return const SizedBox.shrink();
                     return _ExpiringBatchesCard(
                       items: expiring,
-                      onMarkSoldOut: (int id) async {
-                        await widget.batchController.markSoldOut(id);
-                      },
                       onViewAll: (int productId, String productName) {
                         Navigator.of(context).push(MaterialPageRoute<void>(
                           builder: (_) => BatchManagementPage(
@@ -684,12 +681,10 @@ class _DashboardPageState extends State<DashboardPage>
 class _ExpiringBatchesCard extends StatelessWidget {
   const _ExpiringBatchesCard({
     required this.items,
-    required this.onMarkSoldOut,
     required this.onViewAll,
   });
 
   final List<ExpiringBatchData> items;
-  final Future<void> Function(int batchId) onMarkSoldOut;
   final void Function(int productId, String productName) onViewAll;
 
   @override
@@ -751,7 +746,6 @@ class _ExpiringBatchesCard extends StatelessWidget {
           for (final ExpiringBatchData item in items.take(5))
             _ExpiringRow(
               item: item,
-              onMarkSoldOut: onMarkSoldOut,
               onViewAll: onViewAll,
             ),
           if (items.length > 5)
@@ -774,12 +768,10 @@ class _ExpiringBatchesCard extends StatelessWidget {
 class _ExpiringRow extends StatelessWidget {
   const _ExpiringRow({
     required this.item,
-    required this.onMarkSoldOut,
     required this.onViewAll,
   });
 
   final ExpiringBatchData item;
-  final Future<void> Function(int) onMarkSoldOut;
   final void Function(int, String) onViewAll;
 
   @override
@@ -837,24 +829,15 @@ class _ExpiringRow extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          Column(
-            children: <Widget>[
-              GestureDetector(
-                onTap: () => onViewAll(batch.productId, item.productName),
-                child: Text('查看',
-                    style: TextStyle(
-                        fontSize: 11,
-                        color: cs.primary,
-                        fontWeight: FontWeight.w500)),
-              ),
-              const SizedBox(height: 4),
-              GestureDetector(
-                onTap: () => onMarkSoldOut(batch.id),
-                child: Text('售完',
-                    style: TextStyle(
-                        fontSize: 11, color: Colors.grey.shade500)),
-              ),
-            ],
+          GestureDetector(
+            onTap: () => onViewAll(batch.productId, item.productName),
+            child: Text(
+              '查看',
+              style: TextStyle(
+                  fontSize: 12,
+                  color: cs.primary,
+                  fontWeight: FontWeight.w500),
+            ),
           ),
         ],
       ),
