@@ -2410,7 +2410,7 @@ impl PostgresRepository {
                     cost_price = $2,
                     last_inbound_unit_cost = $3,
                     updated_at = NOW()
-                WHERE tenant_id = $5 AND id = $6
+                WHERE tenant_id = $4 AND id = $5
                 "#,
             )
             .bind(existing.current_stock)
@@ -2530,7 +2530,7 @@ impl PostgresRepository {
                 UPDATE products
                 SET current_stock = $1,
                     updated_at = NOW()
-                WHERE tenant_id = $3 AND id = $4
+                WHERE tenant_id = $2 AND id = $3
                 "#,
             )
             .bind(existing.current_stock)
@@ -2942,7 +2942,7 @@ impl PostgresRepository {
                     cost_price = $2,
                     last_inbound_unit_cost = $3,
                     updated_at = NOW()
-                WHERE tenant_id = $5 AND id = $6
+                WHERE tenant_id = $4 AND id = $5
                 "#,
             )
             .bind(new_stock)
@@ -3290,10 +3290,10 @@ impl PostgresRepository {
             r#"
             UPDATE sales_orders
             SET status = $1,
-                remark = $3,
-                returned_at = $4,
-                updated_at = $4
-            WHERE tenant_id = $5 AND id = $6
+                remark = $2,
+                returned_at = $3,
+                updated_at = $3
+            WHERE tenant_id = $4 AND id = $5
             "#,
         )
         .bind(updated.status.as_str())
