@@ -797,7 +797,7 @@ class _ItemRow extends StatelessWidget {
             SizedBox(
               width: 56,
               child: Text(
-                '¥\${item.sellPrice}',
+                '¥${item.sellPrice}',
                 textAlign: TextAlign.right,
                 style: const TextStyle(fontSize: 13),
               ),
@@ -805,7 +805,7 @@ class _ItemRow extends StatelessWidget {
             SizedBox(
               width: 64,
               child: Text(
-                '¥\${item.lineAmount}',
+                '¥${item.lineAmount}',
                 textAlign: TextAlign.right,
                 style:
                     const TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
@@ -822,7 +822,7 @@ class _ItemRow extends StatelessWidget {
                     size: 12, color: scheme.error),
                 const SizedBox(width: 3),
                 Text(
-                  '已退 \${item.returnedQty} 件',
+                  '已退 ${item.returnedQty} 件',
                   style: TextStyle(fontSize: 11, color: scheme.error),
                 ),
               ],
