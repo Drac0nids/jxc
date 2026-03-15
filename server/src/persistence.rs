@@ -129,6 +129,10 @@ async fn apply_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
             "0016_serial_numbers",
             include_str!("../migrations/0016_serial_numbers.sql"),
         ),
+        (
+            "0017_restore_version_columns",
+            include_str!("../migrations/0017_restore_version_columns.sql"),
+        ),
     ];
 
     for (name, sql) in migrations {
