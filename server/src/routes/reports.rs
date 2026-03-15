@@ -425,7 +425,6 @@ pub async fn get_dashboard_orders_drilldown(
                 items: synthetic_items,
                 total_amount: aggregate.total_amount.round_dp(4).to_string(),
                 remark: Some("由库存流水聚合生成（无销售单主记录）".to_string()),
-                version: 0,
                 confirmed_at: Some(aggregate.created_at.clone()),
                 returned_at: None,
                 voided_at: None,

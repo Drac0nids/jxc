@@ -512,7 +512,6 @@ async fn inbound_without_unit_cost_should_fallback_to_last_inbound_unit_cost() {
     assert_eq!(body["data"]["product_id"], 1001);
     assert_eq!(body["data"]["current_stock"], 103);
     assert_eq!(body["data"]["cost_price"], "2.1320");
-    assert_eq!(body["data"]["version"], 2);
 }
 
 #[tokio::test]
@@ -544,7 +543,6 @@ async fn inbound_with_empty_unit_cost_should_fallback_to_last_inbound_unit_cost(
     assert_eq!(body["data"]["product_id"], 1001);
     assert_eq!(body["data"]["current_stock"], 103);
     assert_eq!(body["data"]["cost_price"], "2.1320");
-    assert_eq!(body["data"]["version"], 2);
 }
 
 #[tokio::test]

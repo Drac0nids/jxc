@@ -109,7 +109,6 @@ async fn purchase_order_state_machine_should_confirm_and_void_with_stock_roundtr
         .as_i64()
         .expect("purchase order id");
     assert_eq!(create_body["data"]["status"], "DRAFT");
-    assert_eq!(create_body["data"]["version"], 1);
 
     let confirm_req = Request::builder()
         .method(Method::POST)
@@ -132,7 +131,6 @@ async fn purchase_order_state_machine_should_confirm_and_void_with_stock_roundtr
     assert_eq!(confirm_resp.status(), StatusCode::OK);
     let confirm_body = response_json(confirm_resp).await;
     assert_eq!(confirm_body["data"]["status"], "CONFIRMED");
-    assert_eq!(confirm_body["data"]["version"], 2);
 
     let scan_after_confirm_req = Request::builder()
         .method(Method::GET)
@@ -170,7 +168,6 @@ async fn purchase_order_state_machine_should_confirm_and_void_with_stock_roundtr
     assert_eq!(void_resp.status(), StatusCode::OK);
     let void_body = response_json(void_resp).await;
     assert_eq!(void_body["data"]["status"], "VOIDED");
-    assert_eq!(void_body["data"]["version"], 3);
 
     let scan_after_void_req = Request::builder()
         .method(Method::GET)
@@ -241,7 +238,6 @@ async fn sales_order_state_machine_should_reach_returned_full_and_restore_stock(
     assert_eq!(confirm_resp.status(), StatusCode::OK);
     let confirm_body = response_json(confirm_resp).await;
     assert_eq!(confirm_body["data"]["status"], "CONFIRMED");
-    assert_eq!(confirm_body["data"]["version"], 2);
 
     let return_partial_req = Request::builder()
         .method(Method::POST)
@@ -268,7 +264,6 @@ async fn sales_order_state_machine_should_reach_returned_full_and_restore_stock(
     assert_eq!(return_partial_resp.status(), StatusCode::OK);
     let return_partial_body = response_json(return_partial_resp).await;
     assert_eq!(return_partial_body["data"]["status"], "RETURNED_PARTIAL");
-    assert_eq!(return_partial_body["data"]["version"], 3);
     assert_eq!(return_partial_body["data"]["items"][0]["returned_qty"], 1);
 
     let return_full_req = Request::builder()
@@ -296,7 +291,6 @@ async fn sales_order_state_machine_should_reach_returned_full_and_restore_stock(
     assert_eq!(return_full_resp.status(), StatusCode::OK);
     let return_full_body = response_json(return_full_resp).await;
     assert_eq!(return_full_body["data"]["status"], "RETURNED_FULL");
-    assert_eq!(return_full_body["data"]["version"], 4);
     assert_eq!(return_full_body["data"]["items"][0]["returned_qty"], 3);
 
     let scan_req = Request::builder()
@@ -339,7 +333,6 @@ async fn stock_check_state_machine_should_move_to_confirmed_and_apply_delta() {
     let create_body = response_json(create_resp).await;
     let check_id = create_body["data"]["id"].as_i64().expect("stock check id");
     assert_eq!(create_body["data"]["status"], "DRAFT");
-    assert_eq!(create_body["data"]["version"], 1);
 
     let start_req = Request::builder()
         .method(Method::POST)
@@ -362,7 +355,6 @@ async fn stock_check_state_machine_should_move_to_confirmed_and_apply_delta() {
     assert_eq!(start_resp.status(), StatusCode::OK);
     let start_body = response_json(start_resp).await;
     assert_eq!(start_body["data"]["status"], "COUNTING");
-    assert_eq!(start_body["data"]["version"], 2);
 
     let confirm_req = Request::builder()
         .method(Method::POST)
@@ -389,7 +381,6 @@ async fn stock_check_state_machine_should_move_to_confirmed_and_apply_delta() {
     assert_eq!(confirm_resp.status(), StatusCode::OK);
     let confirm_body = response_json(confirm_resp).await;
     assert_eq!(confirm_body["data"]["status"], "CONFIRMED");
-    assert_eq!(confirm_body["data"]["version"], 3);
     assert_eq!(confirm_body["data"]["items"][0]["delta_qty"], 3);
 
     let scan_req = Request::builder()
@@ -404,64 +395,7 @@ async fn stock_check_state_machine_should_move_to_confirmed_and_apply_delta() {
     assert_eq!(scan_body["data"]["current_stock"], 103);
 }
 
-#[tokio::test]
-async fn expected_version_conflict_should_return_4091_with_latest_snapshot() {
-    let state = make_test_state();
-    let app = build_router(state);
-    let (app, token) = login_token(app).await;
 
-    let create_req = Request::builder()
-        .method(Method::POST)
-        .uri("/api/v1/purchase-orders")
-        .header(header::CONTENT_TYPE, "application/json")
-        .header(header::AUTHORIZATION, format!("Bearer {}", token))
-        .header("X-Idempotency-Key", "idem-po-create-4091-001")
-        .body(Body::from(
-            json!({
-                "items": [{
-                    "product_id": 1001,
-                    "qty": 1,
-                    "unit_cost": "2.20"
-                }]
-            })
-            .to_string(),
-        ))
-        .expect("build create request");
-    let create_resp = app
-        .clone()
-        .oneshot(create_req)
-        .await
-        .expect("send create request");
-    assert_eq!(create_resp.status(), StatusCode::OK);
-    let create_body = response_json(create_resp).await;
-    let order_id = create_body["data"]["id"]
-        .as_i64()
-        .expect("purchase order id");
-
-    let conflict_req = Request::builder()
-        .method(Method::POST)
-        .uri(format!("/api/v1/purchase-orders/{order_id}/confirm"))
-        .header(header::CONTENT_TYPE, "application/json")
-        .header(header::AUTHORIZATION, format!("Bearer {}", token))
-        .header("X-Idempotency-Key", "idem-po-confirm-4091-001")
-        .body(Body::from(
-            json!({
-                "expected_version": 999
-            })
-            .to_string(),
-        ))
-        .expect("build conflict request");
-    let conflict_resp = app
-        .oneshot(conflict_req)
-        .await
-        .expect("send conflict request");
-    assert_eq!(conflict_resp.status(), StatusCode::CONFLICT);
-    let conflict_body = response_json(conflict_resp).await;
-    assert_eq!(conflict_body["code"], 4091);
-    assert_eq!(conflict_body["data"]["resource"], "purchase_order");
-    assert_eq!(conflict_body["data"]["current_version"], 1);
-    assert!(conflict_body["data"]["latest_snapshot"].is_object());
-}
 
 #[tokio::test]
 async fn idempotency_payload_conflict_should_return_4092() {
@@ -690,9 +624,9 @@ async fn dashboard_report_should_use_stock_log_aligned_metrics() {
                 retail_price: Decimal::new(500, 2),
                 last_inbound_unit_cost: Some(Decimal::new(450, 2)),
                 min_stock_limit: 5,
-                version: 1,
                 is_deleted: false,
                 category_id: None,
+track_batches: false,
             },
         );
     }
@@ -728,7 +662,6 @@ async fn dashboard_report_should_use_stock_log_aligned_metrics() {
                 ],
                 remark: None,
                 created_by: operator_id,
-                version: 2,
                 confirmed_at: Some(now.clone()),
                 returned_at: None,
                 voided_at: None,
@@ -755,7 +688,6 @@ async fn dashboard_report_should_use_stock_log_aligned_metrics() {
                 }],
                 remark: None,
                 created_by: operator_id,
-                version: 2,
                 confirmed_at: Some(now.clone()),
                 returned_at: None,
                 voided_at: None,
@@ -876,7 +808,6 @@ async fn dashboard_orders_drilldown_should_align_with_dashboard_total_orders_and
                 }],
                 remark: None,
                 created_by: operator_id,
-                version: 2,
                 confirmed_at: Some(now.clone()),
                 returned_at: None,
                 voided_at: None,
@@ -902,7 +833,6 @@ async fn dashboard_orders_drilldown_should_align_with_dashboard_total_orders_and
                 }],
                 remark: None,
                 created_by: operator_id,
-                version: 2,
                 confirmed_at: Some(now.clone()),
                 returned_at: None,
                 voided_at: None,
@@ -929,7 +859,6 @@ async fn dashboard_orders_drilldown_should_align_with_dashboard_total_orders_and
                 }],
                 remark: None,
                 created_by: operator_id,
-                version: 2,
                 confirmed_at: Some(now.clone()),
                 returned_at: None,
                 voided_at: None,

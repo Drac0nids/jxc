@@ -12,11 +12,13 @@ import '../models/inventory_models.dart';
 import 'inbound_logs_page.dart';
 import '../../products/application/batch_controller.dart';
 import '../../products/application/product_controller.dart';
+import '../../products/application/supplier_controller.dart';
 import '../../products/models/product_models.dart';
 import '../../products/presentation/batch_link_sheet.dart';
 import '../../products/presentation/create_product_sheet.dart';
+import '../../products/presentation/supplier_management_page.dart';
 
-enum _InboundScanMode { scanConfirm, continuousScan }
+enum InboundScanMode { scanConfirm, continuousScan }
 
 class _InboundDraftItem {
   const _InboundDraftItem({
@@ -63,6 +65,9 @@ class InboundPage extends StatefulWidget {
     required this.scanPreferenceScope,
     required this.logsController,
     this.batchController,
+    this.supplierController,
+    this.autoScan = false,
+    this.initialScanMode,
   });
 
   final InboundController controller;
@@ -71,6 +76,11 @@ class InboundPage extends StatefulWidget {
   final String scanPreferenceScope;
   final InboundLogsController logsController;
   final BatchController? batchController;
+  final SupplierController? supplierController;
+  /// 进入页面后自动触发摄像头扫码
+  final bool autoScan;
+  /// 预设扫码模式（仅当 autoScan=true 时生效）
+  final InboundScanMode? initialScanMode;
 
   @override
   State<InboundPage> createState() => _InboundPageState();
@@ -92,7 +102,7 @@ class _InboundPageState extends State<InboundPage> {
       TextEditingController();
   final TextEditingController _remarkController = TextEditingController();
 
-  _InboundScanMode _scanMode = _InboundScanMode.scanConfirm;
+  InboundScanMode _scanMode = InboundScanMode.scanConfirm;
   String _scanConfirmProductId = '';
   String _scanConfirmProductName = '';
   String _scanConfirmBarcode = '';
@@ -112,27 +122,44 @@ class _InboundPageState extends State<InboundPage> {
     _restoreStoredScanMode();
   }
 
+  void _scheduleAutoScanIfNeeded() {
+    if (!widget.autoScan) return;
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!widget.controller.canSubmit) return;
+      if (widget.initialScanMode != null) {
+        setState(() => _scanMode = widget.initialScanMode!);
+      }
+      if (_scanMode == InboundScanMode.continuousScan) {
+        unawaited(_startContinuousScanSession());
+      } else {
+        unawaited(_scanWithCamera());
+      }
+    });
+  }
+
   Future<void> _restoreStoredScanMode() async {
     final storedMode = await widget.sessionStorage.readScanMode(
       scope: widget.scanPreferenceScope,
       page: 'inbound',
     );
     final normalizedStoredMode = storedMode?.trim();
-    final parsedMode = _modeFromStorage(normalizedStoredMode);
-    if (!mounted || parsedMode == null) {
-      return;
+    final parsedMode = widget.initialScanMode ??
+        _modeFromStorage(normalizedStoredMode);
+    if (!mounted) return;
+    if (parsedMode != null) {
+      setState(() {
+        _scanMode = parsedMode;
+      });
     }
-
-    setState(() {
-      _scanMode = parsedMode;
-    });
-
-    if (normalizedStoredMode != _modeToStorage(parsedMode)) {
-      unawaited(_persistScanMode(parsedMode));
+    if (normalizedStoredMode != _modeToStorage(_scanMode)) {
+      unawaited(_persistScanMode(_scanMode));
     }
+    _scheduleAutoScanIfNeeded();
   }
 
-  Future<void> _persistScanMode(_InboundScanMode mode) {
+  Future<void> _persistScanMode(InboundScanMode mode) {
     return widget.sessionStorage.writeScanMode(
       scope: widget.scanPreferenceScope,
       page: 'inbound',
@@ -140,23 +167,23 @@ class _InboundPageState extends State<InboundPage> {
     );
   }
 
-  String _modeToStorage(_InboundScanMode mode) {
+  String _modeToStorage(InboundScanMode mode) {
     switch (mode) {
-      case _InboundScanMode.scanConfirm:
+      case InboundScanMode.scanConfirm:
         return 'scan_confirm';
-      case _InboundScanMode.continuousScan:
+      case InboundScanMode.continuousScan:
         return 'continuous_scan';
     }
   }
 
-  _InboundScanMode? _modeFromStorage(String? value) {
+  InboundScanMode? _modeFromStorage(String? value) {
     switch (value?.trim()) {
       case 'quick_accumulate':
-        return _InboundScanMode.continuousScan;
+        return InboundScanMode.continuousScan;
       case 'scan_confirm':
-        return _InboundScanMode.scanConfirm;
+        return InboundScanMode.scanConfirm;
       case 'continuous_scan':
-        return _InboundScanMode.continuousScan;
+        return InboundScanMode.continuousScan;
       default:
         return null;
     }
@@ -198,6 +225,19 @@ class _InboundPageState extends State<InboundPage> {
           appBar: AppBar(
             title: const Text('采购入库'),
             actions: [
+              // 供应商管理（归属采购场景，放在入库页管理）
+              if (widget.supplierController != null)
+                IconButton(
+                  tooltip: '供应商管理',
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => SupplierManagementPage(
+                        controller: widget.supplierController!,
+                      ),
+                    ),
+                  ),
+                  icon: const Icon(Icons.handshake_outlined),
+                ),
               TextButton.icon(
                 onPressed: () {
                   final now = DateTime.now();
@@ -223,13 +263,6 @@ class _InboundPageState extends State<InboundPage> {
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: <Widget>[
-              const BrandHeroBanner(
-                title: '采购入库作业',
-                subtitle: '支持扫码确认、连续扫码会话与多商品明细批量提交',
-                icon: Icons.move_to_inbox_rounded,
-                gradientSeedColor: Color(0xFF10B981),
-              ),
-              const SizedBox(height: 12),
               // ── Inbound logs shortcut card ─────────────────────────────
               _InboundLogsShortcutCard(
                 onTap: () {
@@ -270,7 +303,6 @@ class _InboundPageState extends State<InboundPage> {
                 onScan: _onPrimaryScanPressed,
                 onCameraScan: _scanWithCamera,
                 onBarcodeSubmitted: _onScanBarcodeSubmitted,
-                onScanModeChanged: _onScanModeChanged,
                 onStopScanConfirmSession: _stopScanConfirmSession,
                 onClear: _resetScan,
               ),
@@ -438,22 +470,9 @@ class _InboundPageState extends State<InboundPage> {
     );
   }
 
-  void _onScanModeChanged(_InboundScanMode mode) {
-    setState(() {
-      _scanMode = mode;
-      if (mode != _InboundScanMode.scanConfirm) {
-        _scanConfirmSessionActive = false;
-        _scanConfirmProcessedCount = 0;
-      }
-      if (mode != _InboundScanMode.continuousScan) {
-        _continuousSessionActive = false;
-      }
-    });
-    unawaited(_persistScanMode(mode));
-  }
 
   void _onScanBarcodeSubmitted(String _) {
-    if (_scanMode == _InboundScanMode.continuousScan ||
+    if (_scanMode == InboundScanMode.continuousScan ||
         widget.controller.scanning ||
         widget.controller.submitting ||
         !widget.controller.canSubmit) {
@@ -464,7 +483,7 @@ class _InboundPageState extends State<InboundPage> {
   }
 
   Future<void> _onPrimaryScanPressed() async {
-    if (_scanMode != _InboundScanMode.continuousScan &&
+    if (_scanMode != InboundScanMode.continuousScan &&
         _scanBarcodeController.text.trim().isEmpty) {
       await _scanWithCamera();
       return;
@@ -475,10 +494,10 @@ class _InboundPageState extends State<InboundPage> {
 
   Future<void> _scanByCurrentMode() async {
     switch (_scanMode) {
-      case _InboundScanMode.scanConfirm:
+      case InboundScanMode.scanConfirm:
         await _scanForConfirm();
         return;
-      case _InboundScanMode.continuousScan:
+      case InboundScanMode.continuousScan:
         await _startContinuousScanSession();
         return;
     }
@@ -497,7 +516,7 @@ class _InboundPageState extends State<InboundPage> {
 
     FocusScope.of(context).unfocus();
 
-    if (_scanMode == _InboundScanMode.continuousScan) {
+    if (_scanMode == InboundScanMode.continuousScan) {
       await _startContinuousScanSession();
       return;
     }
@@ -607,7 +626,7 @@ class _InboundPageState extends State<InboundPage> {
       return;
     }
 
-    if (confirmed != true && _scanMode == _InboundScanMode.scanConfirm) {
+    if (confirmed != true && _scanMode == InboundScanMode.scanConfirm) {
       _scanBarcodeController.clear();
       _scanBarcodeFocusNode.requestFocus();
       _showSnack('已取消本次确认，可继续扫码');
@@ -640,13 +659,13 @@ class _InboundPageState extends State<InboundPage> {
     );
     _scanBarcodeController.clear();
     setState(() {
-      if (_scanMode == _InboundScanMode.scanConfirm) {
+      if (_scanMode == InboundScanMode.scanConfirm) {
         _scanConfirmSessionActive = true;
         _scanConfirmProcessedCount += 1;
       }
     });
 
-    if (_scanMode == _InboundScanMode.scanConfirm) {
+    if (_scanMode == InboundScanMode.scanConfirm) {
       _showSnack('确认写入成功，已加入入库明细（共 ${_effectiveDraftItems.length} 条）');
       _scanBarcodeFocusNode.requestFocus();
     }
@@ -1130,7 +1149,6 @@ class _ScanCard extends StatelessWidget {
     required this.onScan,
     required this.onCameraScan,
     required this.onBarcodeSubmitted,
-    required this.onScanModeChanged,
     required this.onStopScanConfirmSession,
     required this.onClear,
   });
@@ -1141,7 +1159,7 @@ class _ScanCard extends StatelessWidget {
   final bool canSubmit;
   final String? scanErrorMessage;
   final String? scanSuccessMessage;
-  final _InboundScanMode scanMode;
+  final InboundScanMode scanMode;
   final bool scanConfirmSessionActive;
   final int scanConfirmProcessedCount;
   final bool continuousSessionActive;
@@ -1150,52 +1168,17 @@ class _ScanCard extends StatelessWidget {
   final VoidCallback onScan;
   final VoidCallback onCameraScan;
   final ValueChanged<String> onBarcodeSubmitted;
-  final ValueChanged<_InboundScanMode> onScanModeChanged;
   final VoidCallback onStopScanConfirmSession;
   final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
     return SectionCard(
-      title: '条码入库',
-      subtitle: '支持确认写入与连续扫码会话（命中后加入待提交明细）',
+      title: '扫码',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            '扫码模式',
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              ChoiceChip(
-                label: const Text('确认写入（默认）'),
-                selected: scanMode == _InboundScanMode.scanConfirm,
-                onSelected: scanning || submitting
-                    ? null
-                    : (bool selected) {
-                        if (selected) {
-                          onScanModeChanged(_InboundScanMode.scanConfirm);
-                        }
-                      },
-              ),
-              ChoiceChip(
-                label: const Text('连续扫码会话'),
-                selected: scanMode == _InboundScanMode.continuousScan,
-                onSelected: scanning || submitting
-                    ? null
-                    : (bool selected) {
-                        if (selected) {
-                          onScanModeChanged(_InboundScanMode.continuousScan);
-                        }
-                      },
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
+        children: <Widget>[        const SizedBox(height: 4),
+
           TextField(
             controller: barcodeController,
             focusNode: scanBarcodeFocusNode,
@@ -1221,7 +1204,7 @@ class _ScanCard extends StatelessWidget {
               FilledButton(
                 onPressed: scanning || submitting || !canSubmit ? null : onScan,
                 child: Text(
-                  scanMode == _InboundScanMode.continuousScan
+                  scanMode == InboundScanMode.continuousScan
                       ? (continuousSessionActive ? '会话扫码中...' : '开始连续扫码')
                       : (scanning ? '识别中...' : '按条码处理'),
                 ),
@@ -1230,7 +1213,7 @@ class _ScanCard extends StatelessWidget {
                 onPressed: scanning || submitting ? null : onClear,
                 child: const Text('清空'),
               ),
-              if (scanMode == _InboundScanMode.scanConfirm &&
+              if (scanMode == InboundScanMode.scanConfirm &&
                   scanConfirmSessionActive)
                 OutlinedButton(
                   onPressed:
@@ -1241,7 +1224,7 @@ class _ScanCard extends StatelessWidget {
           ),
           const SizedBox(height: 8),
           Text(
-            scanMode == _InboundScanMode.continuousScan
+            scanMode == InboundScanMode.continuousScan
                 ? '连续扫码会话：${continuousSessionActive ? '进行中' : '未开始'}，已处理 $continuousProcessedCount 条。'
                 : '确认续扫会话：${scanConfirmSessionActive ? '进行中' : '未开始'}，已处理 $scanConfirmProcessedCount 条。',
           ),

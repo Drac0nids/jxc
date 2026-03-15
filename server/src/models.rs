@@ -9,6 +9,7 @@ use uuid::Uuid;
 #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
 pub enum UserRole {
     Owner,
+    Admin,
     Purchaser,
     Sales,
 }
@@ -17,8 +18,19 @@ impl UserRole {
     pub fn as_str(&self) -> &'static str {
         match self {
             UserRole::Owner => "OWNER",
+            UserRole::Admin => "ADMIN",
             UserRole::Purchaser => "PURCHASER",
             UserRole::Sales => "SALES",
+        }
+    }
+
+    /// 角色层级（数值越大权限越高）
+    pub fn rank(&self) -> u8 {
+        match self {
+            UserRole::Owner => 100,
+            UserRole::Admin => 50,
+            UserRole::Purchaser => 10,
+            UserRole::Sales => 10,
         }
     }
 }
@@ -53,7 +65,7 @@ pub struct Product {
     pub retail_price: Decimal,
     pub last_inbound_unit_cost: Option<Decimal>,
     pub min_stock_limit: i32,
-    pub version: i32,
+
     pub is_deleted: bool,
     pub category_id: Option<i64>,
     pub track_batches: bool,
@@ -201,7 +213,7 @@ pub struct PurchaseOrder {
     pub items: Vec<PurchaseOrderItem>,
     pub remark: Option<String>,
     pub created_by: Uuid,
-    pub version: i32,
+
     pub confirmed_at: Option<String>,
     pub voided_at: Option<String>,
     pub created_at: String,
@@ -227,7 +239,7 @@ pub struct SalesOrder {
     pub items: Vec<SalesOrderItem>,
     pub remark: Option<String>,
     pub created_by: Uuid,
-    pub version: i32,
+
     pub confirmed_at: Option<String>,
     pub returned_at: Option<String>,
     pub voided_at: Option<String>,
@@ -252,7 +264,7 @@ pub struct StockCheck {
     pub items: Vec<StockCheckItem>,
     pub remark: Option<String>,
     pub created_by: Uuid,
-    pub version: i32,
+
     pub counting_at: Option<String>,
     pub confirmed_at: Option<String>,
     pub created_at: String,

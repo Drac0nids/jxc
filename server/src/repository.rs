@@ -153,6 +153,18 @@ impl RepositoryProvider {
         }
     }
 
+    pub async fn delete_user(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::Postgres(repo) => repo.delete_user(pool, tenant_id, user_id).await,
+            Self::Memory(_) => Err(unsupported_operation("delete_user")),
+        }
+    }
+
     pub async fn find_product_by_barcode(
         &self,
         pool: Option<&PgPool>,
@@ -330,10 +342,10 @@ impl RepositoryProvider {
         &self,
         pool: Option<&PgPool>,
         product: &Product,
-        expected_version: Option<i32>,
+
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.update_product(pool, product, expected_version).await,
+            Self::Postgres(repo) => repo.update_product(pool, product).await,
             Self::Memory(_) => Err(unsupported_operation("update_product")),
         }
     }
@@ -346,7 +358,7 @@ impl RepositoryProvider {
         product_id: i64,
         qty: i32,
         unit_cost: Option<Decimal>,
-        expected_version: Option<i32>,
+
         biz_no: &str,
         operator_id: Uuid,
     ) -> Result<Product, AppError> {
@@ -358,7 +370,7 @@ impl RepositoryProvider {
                     product_id,
                     qty,
                     unit_cost,
-                    expected_version,
+
                     biz_no,
                     operator_id,
                 )
@@ -1262,7 +1274,7 @@ impl PostgresRepository {
         new_role: UserRole,
     ) -> Result<(), AppError> {
         let pool = require_pool(pool)?;
-        let result = sqlx::query(
+        let _result = sqlx::query(
             r#"
             UPDATE users
             SET role = $1, updated_at = NOW()
@@ -1276,9 +1288,6 @@ impl PostgresRepository {
         .await
         .map_err(|err| map_sqlx_error("修改员工角色失败", err))?;
 
-        if result.rows_affected() == 0 {
-            return Err(AppError::not_found("员工不存在"));
-        }
         Ok(())
     }
 
@@ -1290,7 +1299,7 @@ impl PostgresRepository {
         new_password_hash: &str,
     ) -> Result<(), AppError> {
         let pool = require_pool(pool)?;
-        let result = sqlx::query(
+        let _result = sqlx::query(
             r#"
             UPDATE users
             SET password_hash = $1, updated_at = NOW()
@@ -1303,6 +1312,28 @@ impl PostgresRepository {
         .execute(pool)
         .await
         .map_err(|err| map_sqlx_error("重置员工密码失败", err))?;
+
+        Ok(())
+    }
+
+    pub async fn delete_user(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        user_id: Uuid,
+    ) -> Result<(), AppError> {
+        let pool = require_pool(pool)?;
+        let result = sqlx::query(
+            r#"
+            DELETE FROM users
+            WHERE id = $1 AND tenant_id = $2
+            "#,
+        )
+        .bind(user_id)
+        .bind(tenant_id)
+        .execute(pool)
+        .await
+        .map_err(|err| map_sqlx_error("删除员工失败", err))?;
 
         if result.rows_affected() == 0 {
             return Err(AppError::not_found("员工不存在"));
@@ -1587,8 +1618,7 @@ impl PostgresRepository {
                 .to_rfc3339();
 
             orders.push(SalesOrder {
-                id: order_id,
-                tenant_id: row
+                id: order_id, tenant_id: row
                     .try_get("tenant_id")
                     .map_err(|err| map_sqlx_error("读取租户ID失败", err))?,
                 biz_no: row
@@ -1605,9 +1635,6 @@ impl PostgresRepository {
                 created_by: row
                     .try_get("created_by")
                     .map_err(|err| map_sqlx_error("读取创建人失败", err))?,
-                version: row
-                    .try_get("version")
-                    .map_err(|err| map_sqlx_error("读取版本失败", err))?,
                 confirmed_at,
                 returned_at,
                 voided_at,
@@ -1710,8 +1737,7 @@ impl PostgresRepository {
                 .to_rfc3339();
 
             orders.push(PurchaseOrder {
-                id: order_id,
-                tenant_id: row
+                id: order_id, tenant_id: row
                     .try_get("tenant_id")
                     .map_err(|err| map_sqlx_error("读取租户ID失败", err))?,
                 biz_no: row
@@ -1728,9 +1754,6 @@ impl PostgresRepository {
                 created_by: row
                     .try_get("created_by")
                     .map_err(|err| map_sqlx_error("读取创建人失败", err))?,
-                version: row
-                    .try_get("version")
-                    .map_err(|err| map_sqlx_error("读取版本失败", err))?,
                 confirmed_at,
                 voided_at,
                 created_at,
@@ -2052,7 +2075,6 @@ impl PostgresRepository {
         .bind(product.retail_price)
         .bind(product.last_inbound_unit_cost)
         .bind(product.min_stock_limit)
-        .bind(product.version)
         .bind(product.is_deleted)
         .bind(product.category_id)
         .bind(product.track_batches)
@@ -2067,114 +2089,47 @@ impl PostgresRepository {
         &self,
         pool: Option<&PgPool>,
         product: &Product,
-        expected_version: Option<i32>,
     ) -> Result<(), AppError> {
         let pool = require_pool(pool)?;
-        let result = if let Some(ev) = expected_version {
-            sqlx::query(
-                r#"
-                UPDATE products
-                SET sku = $1,
-                    barcode = $2,
-                    name = $3,
-                    unit = $4,
-                    current_stock = $5,
-                    cost_price = $6,
-                    retail_price = $7,
-                    last_inbound_unit_cost = $8,
-                    min_stock_limit = $9,
-                    version = $10,
-                    is_deleted = $11,
-                    category_id = $12,
-                    track_batches = $13,
-                    updated_at = NOW()
-                WHERE id = $14
-                  AND tenant_id = $15
-                  AND version = $16
-                "#,
-            )
-            .bind(&product.sku)
-            .bind(&product.barcode)
-            .bind(&product.name)
-            .bind(&product.unit)
-            .bind(product.current_stock)
-            .bind(product.cost_price)
-            .bind(product.retail_price)
-            .bind(product.last_inbound_unit_cost)
-            .bind(product.min_stock_limit)
-            .bind(product.version)
-            .bind(product.is_deleted)
-            .bind(product.category_id)
-            .bind(product.track_batches)
-            .bind(product.id)
-            .bind(product.tenant_id)
-            .bind(ev)
-            .execute(pool)
-            .await
-            .map_err(|err| map_sqlx_error("更新商品失败", err))?
-        } else {
-            sqlx::query(
-                r#"
-                UPDATE products
-                SET sku = $1,
-                    barcode = $2,
-                    name = $3,
-                    unit = $4,
-                    current_stock = $5,
-                    cost_price = $6,
-                    retail_price = $7,
-                    last_inbound_unit_cost = $8,
-                    min_stock_limit = $9,
-                    version = $10,
-                    is_deleted = $11,
-                    category_id = $12,
-                    track_batches = $13,
-                    updated_at = NOW()
-                WHERE id = $14
-                  AND tenant_id = $15
-                "#,
-            )
-            .bind(&product.sku)
-            .bind(&product.barcode)
-            .bind(&product.name)
-            .bind(&product.unit)
-            .bind(product.current_stock)
-            .bind(product.cost_price)
-            .bind(product.retail_price)
-            .bind(product.last_inbound_unit_cost)
-            .bind(product.min_stock_limit)
-            .bind(product.version)
-            .bind(product.is_deleted)
-            .bind(product.category_id)
-            .bind(product.track_batches)
-            .bind(product.id)
-            .bind(product.tenant_id)
-            .execute(pool)
-            .await
-            .map_err(|err| map_sqlx_error("更新商品失败", err))?
-        };
+        let result = sqlx::query(
+            r#"
+            UPDATE products
+            SET sku = $1,
+                barcode = $2,
+                name = $3,
+                unit = $4,
+                current_stock = $5,
+                cost_price = $6,
+                retail_price = $7,
+                last_inbound_unit_cost = $8,
+                min_stock_limit = $9,
+                is_deleted = $10,
+                category_id = $11,
+                track_batches = $12,
+                updated_at = NOW()
+            WHERE id = $13
+              AND tenant_id = $14
+            "#,
+        )
+        .bind(&product.sku)
+        .bind(&product.barcode)
+        .bind(&product.name)
+        .bind(&product.unit)
+        .bind(product.current_stock)
+        .bind(product.cost_price)
+        .bind(product.retail_price)
+        .bind(product.last_inbound_unit_cost)
+        .bind(product.min_stock_limit)
+        .bind(product.is_deleted)
+        .bind(product.category_id)
+        .bind(product.track_batches)
+        .bind(product.id)
+        .bind(product.tenant_id)
+        .execute(pool)
+        .await
+        .map_err(|err| map_sqlx_error("更新商品失败", err))?;
 
         if result.rows_affected() == 0 {
-            if let Some(ev) = expected_version
-                && let Some(latest) = self
-                    .find_product_by_id(Some(pool), product.tenant_id, product.id, true)
-                    .await?
-            {
-                if latest.is_deleted {
-                    return Err(AppError::not_found("商品不存在"));
-                }
-
-                return Err(
-                    AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                        "resource": "product",
-                        "resource_id": latest.id,
-                        "expected_version": ev,
-                        "current_version": latest.version,
-                        "latest_snapshot": product_snapshot(&latest)
-                    })),
-                );
-            }
-
             return Err(AppError::not_found("商品不存在"));
         }
 
@@ -2189,7 +2144,7 @@ impl PostgresRepository {
         product_id: i64,
         qty: i32,
         unit_cost: Option<Decimal>,
-        expected_version: Option<i32>,
+
         biz_no: &str,
         operator_id: Uuid,
     ) -> Result<Product, AppError> {
@@ -2225,19 +2180,7 @@ impl PostgresRepository {
             return Err(AppError::not_found("商品不存在"));
         }
 
-        if let Some(ev) = expected_version
-            && ev != existing.version
-        {
-            return Err(
-                AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                    "resource": "product",
-                    "resource_id": existing.id,
-                    "expected_version": ev,
-                    "current_version": existing.version,
-                    "latest_snapshot": product_snapshot(&existing)
-                })),
-            );
-        }
+        
 
         let old_stock = existing.current_stock;
         let old_cost = existing.cost_price;
@@ -2256,7 +2199,6 @@ impl PostgresRepository {
         existing.current_stock = new_stock;
         existing.cost_price = new_cost;
         existing.last_inbound_unit_cost = Some(effective_unit_cost.round_dp(4));
-        existing.version += 1;
 
         sqlx::query(
             r#"
@@ -2264,15 +2206,13 @@ impl PostgresRepository {
             SET current_stock = $1,
                 cost_price = $2,
                 last_inbound_unit_cost = $3,
-                version = $4,
                 updated_at = NOW()
-            WHERE tenant_id = $5 AND id = $6
+            WHERE tenant_id = $4 AND id = $5
             "#,
         )
         .bind(existing.current_stock)
         .bind(existing.cost_price)
         .bind(existing.last_inbound_unit_cost)
-        .bind(existing.version)
         .bind(tenant_id)
         .bind(product_id)
         .execute(&mut *tx)
@@ -2333,7 +2273,7 @@ impl PostgresRepository {
         let mut next_stock_log_id = self.next_stock_log_id_in_tx(&mut tx).await?;
         let mut updated_products = Vec::with_capacity(items.len());
 
-        for &(product_id, qty, unit_cost, expected_version) in items {
+        for &(product_id, qty, unit_cost, _) in items {
             if qty <= 0 {
                 return Err(AppError::bad_request("items.qty 必须大于 0"));
             }
@@ -2360,19 +2300,7 @@ impl PostgresRepository {
                 return Err(AppError::not_found("商品不存在"));
             }
 
-            if let Some(ev) = expected_version
-                && ev != existing.version
-            {
-                return Err(
-                    AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                        "resource": "product",
-                        "resource_id": existing.id,
-                        "expected_version": ev,
-                        "current_version": existing.version,
-                        "latest_snapshot": product_snapshot(&existing)
-                    })),
-                );
-            }
+            
 
             let old_stock = existing.current_stock;
             let old_cost = existing.cost_price;
@@ -2391,7 +2319,6 @@ impl PostgresRepository {
             existing.current_stock = new_stock;
             existing.cost_price = new_cost;
             existing.last_inbound_unit_cost = Some(effective_unit_cost.round_dp(4));
-            existing.version += 1;
 
             sqlx::query(
                 r#"
@@ -2399,7 +2326,6 @@ impl PostgresRepository {
                 SET current_stock = $1,
                     cost_price = $2,
                     last_inbound_unit_cost = $3,
-                    version = $4,
                     updated_at = NOW()
                 WHERE tenant_id = $5 AND id = $6
                 "#,
@@ -2407,7 +2333,6 @@ impl PostgresRepository {
             .bind(existing.current_stock)
             .bind(existing.cost_price)
             .bind(existing.last_inbound_unit_cost)
-            .bind(existing.version)
             .bind(tenant_id)
             .bind(product_id)
             .execute(&mut *tx)
@@ -2500,20 +2425,8 @@ impl PostgresRepository {
                 return Err(AppError::not_found("商品不存在"));
             }
 
-            let expected_version = item_expected_version.or(default_expected_version);
-            if let Some(ev) = expected_version
-                && ev != existing.version
-            {
-                return Err(
-                    AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                        "resource": "product",
-                        "resource_id": existing.id,
-                        "expected_version": ev,
-                        "current_version": existing.version,
-                        "latest_snapshot": product_snapshot(&existing)
-                    })),
-                );
-            }
+            let _expected_version = item_expected_version.or(default_expected_version);
+            
 
             if !allow_negative_stock && existing.current_stock < qty {
                 return Err(
@@ -2528,19 +2441,16 @@ impl PostgresRepository {
             }
 
             existing.current_stock -= qty;
-            existing.version += 1;
 
             sqlx::query(
                 r#"
                 UPDATE products
                 SET current_stock = $1,
-                    version = $2,
                     updated_at = NOW()
                 WHERE tenant_id = $3 AND id = $4
                 "#,
             )
             .bind(existing.current_stock)
-            .bind(existing.version)
             .bind(tenant_id)
             .bind(existing.id)
             .execute(&mut *tx)
@@ -2712,7 +2622,6 @@ impl PostgresRepository {
         .bind(order.status.as_str())
         .bind(&order.remark)
         .bind(order.created_by)
-        .bind(order.version)
         .bind(parse_optional_datetime(order.confirmed_at.as_deref())?)
         .bind(parse_optional_datetime(order.voided_at.as_deref())?)
         .bind(parse_datetime(&order.created_at)?)
@@ -2864,9 +2773,6 @@ impl PostgresRepository {
             created_by: row
                 .try_get("created_by")
                 .map_err(|err| map_sqlx_error("读取创建人失败", err))?,
-            version: row
-                .try_get("version")
-                .map_err(|err| map_sqlx_error("读取版本失败", err))?,
             confirmed_at,
             voided_at,
             created_at,
@@ -2880,7 +2786,7 @@ impl PostgresRepository {
         pool: Option<&PgPool>,
         tenant_id: Uuid,
         order_id: i64,
-        expected_version: Option<i32>,
+        _expected_version: Option<i32>,
         operator_id: Uuid,
         request_id: &str,
     ) -> Result<PurchaseOrder, AppError> {
@@ -2895,19 +2801,7 @@ impl PostgresRepository {
             .await?
             .ok_or_else(|| AppError::not_found("采购单不存在"))?;
 
-        if let Some(ev) = expected_version
-            && ev != existing.version
-        {
-            return Err(
-                AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                    "resource": "purchase_order",
-                    "resource_id": existing.id,
-                    "expected_version": ev,
-                    "current_version": existing.version,
-                    "latest_snapshot": purchase_order_snapshot(&existing)
-                })),
-            );
-        }
+        
 
         if existing.status != PurchaseOrderStatus::Draft {
             return Err(AppError::conflict(4090, "仅 DRAFT 状态可确认采购单")
@@ -2948,9 +2842,6 @@ impl PostgresRepository {
             let old_cost: Decimal = product_row
                 .try_get("cost_price")
                 .map_err(|err| map_sqlx_error("读取成本价失败", err))?;
-            let old_version: i32 = product_row
-                .try_get("version")
-                .map_err(|err| map_sqlx_error("读取商品版本失败", err))?;
 
             let new_stock = old_stock + item.qty;
             let new_cost = if new_stock <= 0 {
@@ -2967,7 +2858,6 @@ impl PostgresRepository {
                 SET current_stock = $1,
                     cost_price = $2,
                     last_inbound_unit_cost = $3,
-                    version = $4,
                     updated_at = NOW()
                 WHERE tenant_id = $5 AND id = $6
                 "#,
@@ -2975,7 +2865,6 @@ impl PostgresRepository {
             .bind(new_stock)
             .bind(new_cost)
             .bind(Some(item.unit_cost.round_dp(4)))
-            .bind(old_version + 1)
             .bind(tenant_id)
             .bind(product_id)
             .execute(&mut *tx)
@@ -3013,7 +2902,6 @@ impl PostgresRepository {
         let now_rfc3339 = now.to_rfc3339();
         let mut updated = existing.clone();
         updated.status = PurchaseOrderStatus::Confirmed;
-        updated.version += 1;
         updated.confirmed_at = Some(now_rfc3339.clone());
         updated.updated_at = now_rfc3339.clone();
 
@@ -3021,13 +2909,11 @@ impl PostgresRepository {
             r#"
             UPDATE purchase_orders
             SET status = 'CONFIRMED',
-                version = $1,
                 confirmed_at = $2,
                 updated_at = $2
             WHERE tenant_id = $3 AND id = $4
             "#,
         )
-        .bind(updated.version)
         .bind(now)
         .bind(tenant_id)
         .bind(order_id)
@@ -3071,7 +2957,7 @@ impl PostgresRepository {
         pool: Option<&PgPool>,
         tenant_id: Uuid,
         order_id: i64,
-        expected_version: Option<i32>,
+        _expected_version: Option<i32>,
         operator_id: Uuid,
         request_id: &str,
     ) -> Result<SalesOrder, AppError> {
@@ -3086,19 +2972,7 @@ impl PostgresRepository {
             .await?
             .ok_or_else(|| AppError::not_found("销售单不存在"))?;
 
-        if let Some(ev) = expected_version
-            && ev != existing.version
-        {
-            return Err(
-                AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                    "resource": "sales_order",
-                    "resource_id": existing.id,
-                    "expected_version": ev,
-                    "current_version": existing.version,
-                    "latest_snapshot": sales_order_snapshot(&existing)
-                })),
-            );
-        }
+        
 
         if existing.status != SalesOrderStatus::Draft {
             return Err(AppError::conflict(4090, "仅 DRAFT 状态可作废销售单")
@@ -3109,7 +2983,6 @@ impl PostgresRepository {
         let now_rfc3339 = now.to_rfc3339();
         let mut updated = existing.clone();
         updated.status = SalesOrderStatus::Voided;
-        updated.version += 1;
         updated.voided_at = Some(now_rfc3339.clone());
         updated.updated_at = now_rfc3339;
 
@@ -3117,13 +2990,11 @@ impl PostgresRepository {
             r#"
             UPDATE sales_orders
             SET status = 'VOIDED',
-                version = $1,
                 voided_at = $2,
                 updated_at = $2
             WHERE tenant_id = $3 AND id = $4
             "#,
         )
-        .bind(updated.version)
         .bind(now)
         .bind(tenant_id)
         .bind(order_id)
@@ -3167,7 +3038,7 @@ impl PostgresRepository {
         pool: Option<&PgPool>,
         tenant_id: Uuid,
         order_id: i64,
-        expected_version: Option<i32>,
+        _expected_version: Option<i32>,
         return_items: &[(i64, i32)],
         remark: Option<String>,
         operator_id: Uuid,
@@ -3184,19 +3055,7 @@ impl PostgresRepository {
             .await?
             .ok_or_else(|| AppError::not_found("销售单不存在"))?;
 
-        if let Some(ev) = expected_version
-            && ev != existing.version
-        {
-            return Err(
-                AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                    "resource": "sales_order",
-                    "resource_id": existing.id,
-                    "expected_version": ev,
-                    "current_version": existing.version,
-                    "latest_snapshot": sales_order_snapshot(&existing)
-                })),
-            );
-        }
+        
 
         match existing.status {
             SalesOrderStatus::Confirmed | SalesOrderStatus::ReturnedPartial => {}
@@ -3265,9 +3124,6 @@ impl PostgresRepository {
             let current_stock: i32 = product_row
                 .try_get("current_stock")
                 .map_err(|err| map_sqlx_error("读取库存失败", err))?;
-            let product_version: i32 = product_row
-                .try_get("version")
-                .map_err(|err| map_sqlx_error("读取商品版本失败", err))?;
             let snapshot_cost: Decimal = product_row
                 .try_get("cost_price")
                 .map_err(|err| map_sqlx_error("读取成本价失败", err))?;
@@ -3278,13 +3134,11 @@ impl PostgresRepository {
                 r#"
                 UPDATE products
                 SET current_stock = $1,
-                    version = $2,
                     updated_at = NOW()
                 WHERE tenant_id = $3 AND id = $4
                 "#,
             )
             .bind(new_stock)
-            .bind(product_version + 1)
             .bind(tenant_id)
             .bind(product_id)
             .execute(&mut *tx)
@@ -3341,7 +3195,6 @@ impl PostgresRepository {
         } else {
             SalesOrderStatus::ReturnedPartial
         };
-        updated.version += 1;
         if let Some(remark) = remark {
             updated.remark = Some(remark);
         }
@@ -3354,7 +3207,6 @@ impl PostgresRepository {
             r#"
             UPDATE sales_orders
             SET status = $1,
-                version = $2,
                 remark = $3,
                 returned_at = $4,
                 updated_at = $4
@@ -3362,7 +3214,6 @@ impl PostgresRepository {
             "#,
         )
         .bind(updated.status.as_str())
-        .bind(updated.version)
         .bind(&updated.remark)
         .bind(now)
         .bind(tenant_id)
@@ -3484,7 +3335,6 @@ impl PostgresRepository {
         .bind(check.status.as_str())
         .bind(&check.remark)
         .bind(check.created_by)
-        .bind(check.version)
         .bind(parse_optional_datetime(check.counting_at.as_deref())?)
         .bind(parse_optional_datetime(check.confirmed_at.as_deref())?)
         .bind(parse_datetime(&check.created_at)?)
@@ -3633,9 +3483,6 @@ impl PostgresRepository {
             created_by: row
                 .try_get("created_by")
                 .map_err(|err| map_sqlx_error("读取创建人失败", err))?,
-            version: row
-                .try_get("version")
-                .map_err(|err| map_sqlx_error("读取版本失败", err))?,
             counting_at,
             confirmed_at,
             created_at,
@@ -3649,7 +3496,7 @@ impl PostgresRepository {
         pool: Option<&PgPool>,
         tenant_id: Uuid,
         check_id: i64,
-        expected_version: Option<i32>,
+        _expected_version: Option<i32>,
         operator_id: Uuid,
         request_id: &str,
     ) -> Result<StockCheck, AppError> {
@@ -3664,19 +3511,7 @@ impl PostgresRepository {
             .await?
             .ok_or_else(|| AppError::not_found("盘点单不存在"))?;
 
-        if let Some(ev) = expected_version
-            && ev != existing.version
-        {
-            return Err(
-                AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                    "resource": "stock_check",
-                    "resource_id": existing.id,
-                    "expected_version": ev,
-                    "current_version": existing.version,
-                    "latest_snapshot": stock_check_snapshot(&existing)
-                })),
-            );
-        }
+        
 
         if existing.status != StockCheckStatus::Draft {
             return Err(AppError::conflict(4090, "仅 DRAFT 状态可开始盘点")
@@ -3687,7 +3522,6 @@ impl PostgresRepository {
         let now_rfc3339 = now.to_rfc3339();
         let mut updated = existing.clone();
         updated.status = StockCheckStatus::Counting;
-        updated.version += 1;
         updated.counting_at = Some(now_rfc3339.clone());
         updated.updated_at = now_rfc3339;
 
@@ -3695,13 +3529,11 @@ impl PostgresRepository {
             r#"
             UPDATE stock_checks
             SET status = 'COUNTING',
-                version = $1,
                 counting_at = $2,
                 updated_at = $2
             WHERE tenant_id = $3 AND id = $4
             "#,
         )
-        .bind(updated.version)
         .bind(now)
         .bind(tenant_id)
         .bind(check_id)
@@ -3745,7 +3577,7 @@ impl PostgresRepository {
         pool: Option<&PgPool>,
         tenant_id: Uuid,
         check_id: i64,
-        expected_version: Option<i32>,
+        _expected_version: Option<i32>,
         actual_items: &[(i64, i32)],
         remark: Option<String>,
         operator_id: Uuid,
@@ -3762,19 +3594,7 @@ impl PostgresRepository {
             .await?
             .ok_or_else(|| AppError::not_found("盘点单不存在"))?;
 
-        if let Some(ev) = expected_version
-            && ev != existing.version
-        {
-            return Err(
-                AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                    "resource": "stock_check",
-                    "resource_id": existing.id,
-                    "expected_version": ev,
-                    "current_version": existing.version,
-                    "latest_snapshot": stock_check_snapshot(&existing)
-                })),
-            );
-        }
+        
 
         if existing.status != StockCheckStatus::Counting {
             return Err(AppError::conflict(4090, "仅 COUNTING 状态可确认盘点")
@@ -3847,9 +3667,6 @@ impl PostgresRepository {
             let snapshot_cost: Decimal = product_row
                 .try_get("cost_price")
                 .map_err(|err| map_sqlx_error("读取成本价失败", err))?;
-            let product_version: i32 = product_row
-                .try_get("version")
-                .map_err(|err| map_sqlx_error("读取商品版本失败", err))?;
 
             if current_stock != item.book_stock {
                 return Err(
@@ -3863,7 +3680,6 @@ impl PostgresRepository {
                                 "id": product_id,
                                 "current_stock": current_stock,
                                 "cost_price": snapshot_cost.round_dp(4).to_string(),
-                                "version": product_version
                             }
                         }),
                     ),
@@ -3880,13 +3696,11 @@ impl PostgresRepository {
                 r#"
                 UPDATE products
                 SET current_stock = $1,
-                    version = $2,
                     updated_at = NOW()
                 WHERE tenant_id = $3 AND id = $4
                 "#,
             )
             .bind(actual_stock)
-            .bind(product_version + 1)
             .bind(tenant_id)
             .bind(product_id)
             .execute(&mut *tx)
@@ -3934,7 +3748,6 @@ impl PostgresRepository {
             }
         }
         updated.status = StockCheckStatus::Confirmed;
-        updated.version += 1;
         updated.confirmed_at = Some(now_rfc3339.clone());
         updated.updated_at = now_rfc3339.clone();
         if let Some(remark) = remark {
@@ -3945,14 +3758,12 @@ impl PostgresRepository {
             r#"
             UPDATE stock_checks
             SET status = 'CONFIRMED',
-                version = $1,
                 remark = $2,
                 confirmed_at = $3,
                 updated_at = $3
             WHERE tenant_id = $4 AND id = $5
             "#,
         )
-        .bind(updated.version)
         .bind(&updated.remark)
         .bind(now)
         .bind(tenant_id)
@@ -4108,9 +3919,6 @@ impl PostgresRepository {
             created_by: row
                 .try_get("created_by")
                 .map_err(|err| map_sqlx_error("读取创建人失败", err))?,
-            version: row
-                .try_get("version")
-                .map_err(|err| map_sqlx_error("读取版本失败", err))?,
             counting_at,
             confirmed_at,
             created_at,
@@ -4226,9 +4034,6 @@ impl PostgresRepository {
             created_by: row
                 .try_get("created_by")
                 .map_err(|err| map_sqlx_error("读取创建人失败", err))?,
-            version: row
-                .try_get("version")
-                .map_err(|err| map_sqlx_error("读取版本失败", err))?,
             confirmed_at,
             returned_at,
             voided_at,
@@ -4243,7 +4048,7 @@ impl PostgresRepository {
         pool: Option<&PgPool>,
         tenant_id: Uuid,
         order_id: i64,
-        expected_version: Option<i32>,
+        _expected_version: Option<i32>,
         allow_negative_stock: bool,
         operator_id: Uuid,
         request_id: &str,
@@ -4259,19 +4064,7 @@ impl PostgresRepository {
             .await?
             .ok_or_else(|| AppError::not_found("采购单不存在"))?;
 
-        if let Some(ev) = expected_version
-            && ev != existing.version
-        {
-            return Err(
-                AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                    "resource": "purchase_order",
-                    "resource_id": existing.id,
-                    "expected_version": ev,
-                    "current_version": existing.version,
-                    "latest_snapshot": purchase_order_snapshot(&existing)
-                })),
-            );
-        }
+        
 
         if existing.status == PurchaseOrderStatus::Voided {
             return Err(AppError::conflict(4090, "采购单已作废"));
@@ -4309,9 +4102,6 @@ impl PostgresRepository {
                 let current_stock: i32 = product_row
                     .try_get("current_stock")
                     .map_err(|err| map_sqlx_error("读取库存失败", err))?;
-                let product_version: i32 = product_row
-                    .try_get("version")
-                    .map_err(|err| map_sqlx_error("读取商品版本失败", err))?;
                 let snapshot_cost: Decimal = product_row
                     .try_get("cost_price")
                     .map_err(|err| map_sqlx_error("读取成本价失败", err))?;
@@ -4335,13 +4125,11 @@ impl PostgresRepository {
                     r#"
                     UPDATE products
                     SET current_stock = $1,
-                        version = $2,
                         updated_at = NOW()
                     WHERE tenant_id = $3 AND id = $4
                     "#,
                 )
                 .bind(new_stock)
-                .bind(product_version + 1)
                 .bind(tenant_id)
                 .bind(product_id)
                 .execute(&mut *tx)
@@ -4380,7 +4168,6 @@ impl PostgresRepository {
         let now_rfc3339 = now.to_rfc3339();
         let mut updated = existing.clone();
         updated.status = PurchaseOrderStatus::Voided;
-        updated.version += 1;
         updated.voided_at = Some(now_rfc3339.clone());
         updated.updated_at = now_rfc3339.clone();
 
@@ -4388,13 +4175,11 @@ impl PostgresRepository {
             r#"
             UPDATE purchase_orders
             SET status = 'VOIDED',
-                version = $1,
                 voided_at = $2,
                 updated_at = $2
             WHERE tenant_id = $3 AND id = $4
             "#,
         )
-        .bind(updated.version)
         .bind(now)
         .bind(tenant_id)
         .bind(order_id)
@@ -4501,7 +4286,6 @@ impl PostgresRepository {
         .bind(order.status.as_str())
         .bind(&order.remark)
         .bind(order.created_by)
-        .bind(order.version)
         .bind(parse_optional_datetime(order.confirmed_at.as_deref())?)
         .bind(parse_optional_datetime(order.returned_at.as_deref())?)
         .bind(parse_optional_datetime(order.voided_at.as_deref())?)
@@ -4662,9 +4446,6 @@ impl PostgresRepository {
             created_by: row
                 .try_get("created_by")
                 .map_err(|err| map_sqlx_error("读取创建人失败", err))?,
-            version: row
-                .try_get("version")
-                .map_err(|err| map_sqlx_error("读取版本失败", err))?,
             confirmed_at,
             returned_at,
             voided_at,
@@ -4679,7 +4460,7 @@ impl PostgresRepository {
         pool: Option<&PgPool>,
         tenant_id: Uuid,
         order_id: i64,
-        expected_version: Option<i32>,
+        _expected_version: Option<i32>,
         allow_negative_stock: bool,
         operator_id: Uuid,
         request_id: &str,
@@ -4695,19 +4476,7 @@ impl PostgresRepository {
             .await?
             .ok_or_else(|| AppError::not_found("销售单不存在"))?;
 
-        if let Some(ev) = expected_version
-            && ev != existing.version
-        {
-            return Err(
-                AppError::conflict(4091, "版本冲突，请刷新后重试").with_data(json!({
-                    "resource": "sales_order",
-                    "resource_id": existing.id,
-                    "expected_version": ev,
-                    "current_version": existing.version,
-                    "latest_snapshot": sales_order_snapshot(&existing)
-                })),
-            );
-        }
+        
 
         if existing.status != SalesOrderStatus::Draft {
             return Err(AppError::conflict(4090, "仅 DRAFT 状态可确认销售单")
@@ -4745,9 +4514,6 @@ impl PostgresRepository {
             let current_stock: i32 = product_row
                 .try_get("current_stock")
                 .map_err(|err| map_sqlx_error("读取库存失败", err))?;
-            let product_version: i32 = product_row
-                .try_get("version")
-                .map_err(|err| map_sqlx_error("读取商品版本失败", err))?;
             let snapshot_cost: Decimal = product_row
                 .try_get("cost_price")
                 .map_err(|err| map_sqlx_error("读取成本价失败", err))?;
@@ -4770,13 +4536,11 @@ impl PostgresRepository {
                 r#"
                 UPDATE products
                 SET current_stock = $1,
-                    version = $2,
                     updated_at = NOW()
                 WHERE tenant_id = $3 AND id = $4
                 "#,
             )
             .bind(new_stock)
-            .bind(product_version + 1)
             .bind(tenant_id)
             .bind(product_id)
             .execute(&mut *tx)
@@ -4814,7 +4578,6 @@ impl PostgresRepository {
         let now_rfc3339 = now.to_rfc3339();
         let mut updated = existing.clone();
         updated.status = SalesOrderStatus::Confirmed;
-        updated.version += 1;
         updated.confirmed_at = Some(now_rfc3339.clone());
         updated.updated_at = now_rfc3339.clone();
 
@@ -4822,13 +4585,11 @@ impl PostgresRepository {
             r#"
             UPDATE sales_orders
             SET status = 'CONFIRMED',
-                version = $1,
                 confirmed_at = $2,
                 updated_at = $2
             WHERE tenant_id = $3 AND id = $4
             "#,
         )
-        .bind(updated.version)
         .bind(now)
         .bind(tenant_id)
         .bind(order_id)
@@ -4967,9 +4728,6 @@ impl PostgresRepository {
             created_by: row
                 .try_get("created_by")
                 .map_err(|err| map_sqlx_error("读取创建人失败", err))?,
-            version: row
-                .try_get("version")
-                .map_err(|err| map_sqlx_error("读取版本失败", err))?,
             confirmed_at,
             voided_at,
             created_at,
@@ -5085,9 +4843,6 @@ fn map_product_row(row: sqlx::postgres::PgRow) -> Result<Product, AppError> {
         min_stock_limit: row
             .try_get("min_stock_limit")
             .map_err(|err| map_sqlx_error("读取最低库存失败", err))?,
-        version: row
-            .try_get("version")
-            .map_err(|err| map_sqlx_error("读取版本失败", err))?,
         is_deleted: row
             .try_get("is_deleted")
             .map_err(|err| map_sqlx_error("读取删除标记失败", err))?,
@@ -5238,7 +4993,7 @@ impl PostgresRepository {
         id: i64,
     ) -> Result<(), AppError> {
         let pool = require_pool(pool)?;
-        let result = sqlx::query(
+        let _result = sqlx::query(
             "UPDATE suppliers SET is_deleted = TRUE, updated_at = NOW() WHERE id = $1 AND tenant_id = $2 AND is_deleted = FALSE",
         )
         .bind(id)
@@ -5247,9 +5002,6 @@ impl PostgresRepository {
         .await
         .map_err(|err| map_sqlx_error("删除供应商失败", err))?;
 
-        if result.rows_affected() == 0 {
-            return Err(AppError::not_found("供应商不存在"));
-        }
         Ok(())
     }
 }
@@ -5459,7 +5211,7 @@ impl PostgresRepository {
         }
 
         // 软删除
-        let result = sqlx::query(
+        let _result = sqlx::query(
             r#"
             UPDATE categories
             SET is_deleted = TRUE, updated_at = NOW()
@@ -5472,9 +5224,6 @@ impl PostgresRepository {
         .await
         .map_err(|err| map_sqlx_error("删除分类失败", err))?;
 
-        if result.rows_affected() == 0 {
-            return Err(AppError::not_found("分类不存在"));
-        }
         Ok(())
     }
 
@@ -5693,7 +5442,7 @@ impl PostgresRepository {
         batch_id: i64,
     ) -> Result<(), AppError> {
         let pool = require_pool(pool)?;
-        let result = sqlx::query(
+        let _result = sqlx::query(
             "DELETE FROM product_batches WHERE id = $1 AND tenant_id = $2",
         )
         .bind(batch_id)
@@ -5702,9 +5451,6 @@ impl PostgresRepository {
         .await
         .map_err(|err| map_sqlx_error("删除批次失败", err))?;
 
-        if result.rows_affected() == 0 {
-            return Err(AppError::not_found("批次不存在"));
-        }
         Ok(())
     }
 }
@@ -5756,7 +5502,6 @@ fn product_snapshot(product: &Product) -> Value {
         "id": product.id,
         "current_stock": product.current_stock,
         "cost_price": product.cost_price.round_dp(4).to_string(),
-        "version": product.version
     })
 }
 
@@ -5765,7 +5510,6 @@ fn purchase_order_snapshot(order: &PurchaseOrder) -> Value {
         "id": order.id,
         "biz_no": order.biz_no,
         "status": order.status.as_str(),
-        "version": order.version,
         "updated_at": order.updated_at
     })
 }
@@ -5775,7 +5519,6 @@ fn sales_order_snapshot(order: &SalesOrder) -> Value {
         "id": order.id,
         "biz_no": order.biz_no,
         "status": order.status.as_str(),
-        "version": order.version,
         "updated_at": order.updated_at
     })
 }
@@ -5785,7 +5528,6 @@ fn stock_check_snapshot(check: &StockCheck) -> Value {
         "id": check.id,
         "biz_no": check.biz_no,
         "status": check.status.as_str(),
-        "version": check.version,
         "updated_at": check.updated_at
     })
 }
@@ -6188,9 +5930,9 @@ mod tests {
         .expect("ensure stock_check_items unique index for repository tests");
     }
 
-    fn sample_product(tenant_id: Uuid, product_id: i64, version: i32) -> Product {
+    fn sample_product(tenant_id: Uuid, product_id: i64, _version: i32) -> Product {
         Product {
-            id: product_id,
+            id: product_id, track_batches: false,
             tenant_id,
             sku: format!("SKU-{product_id}"),
             barcode: format!("690{:09}", product_id % 1_000_000_000),
@@ -6201,7 +5943,6 @@ mod tests {
             retail_price: Decimal::new(350, 2),
             last_inbound_unit_cost: Some(Decimal::new(320, 2)),
             min_stock_limit: 5,
-            version,
             is_deleted: false,
             category_id: None,
         }
@@ -6212,12 +5953,11 @@ mod tests {
         order_id: i64,
         product_id: i64,
         created_by: Uuid,
-        version: i32,
+        _version: i32,
     ) -> PurchaseOrder {
         let now = Utc::now().to_rfc3339();
         PurchaseOrder {
-            id: order_id,
-            tenant_id,
+            id: order_id, tenant_id,
             biz_no: format!("PO-REG-{order_id}"),
             supplier_id: Some(1001),
             status: PurchaseOrderStatus::Draft,
@@ -6229,7 +5969,6 @@ mod tests {
             }],
             remark: Some("仓储回归采购单".to_string()),
             created_by,
-            version,
             confirmed_at: None,
             voided_at: None,
             created_at: now.clone(),
@@ -6242,13 +5981,12 @@ mod tests {
         order_id: i64,
         product_id: i64,
         created_by: Uuid,
-        version: i32,
+        _version: i32,
         qty: i32,
     ) -> SalesOrder {
         let now = Utc::now().to_rfc3339();
         SalesOrder {
-            id: order_id,
-            tenant_id,
+            id: order_id, tenant_id,
             biz_no: format!("SO-REG-{order_id}"),
             customer_id: Some(2001),
             status: SalesOrderStatus::Draft,
@@ -6261,7 +5999,6 @@ mod tests {
             }],
             remark: Some("仓储回归销售单".to_string()),
             created_by,
-            version,
             confirmed_at: None,
             returned_at: None,
             voided_at: None,
@@ -6275,13 +6012,12 @@ mod tests {
         check_id: i64,
         product_id: i64,
         created_by: Uuid,
-        version: i32,
+        _version: i32,
         book_stock: i32,
     ) -> StockCheck {
         let now = Utc::now().to_rfc3339();
         StockCheck {
-            id: check_id,
-            tenant_id,
+            id: check_id, tenant_id,
             biz_no: format!("SC-REG-{check_id}"),
             status: StockCheckStatus::Draft,
             items: vec![StockCheckItem {
@@ -6292,7 +6028,6 @@ mod tests {
             }],
             remark: Some("仓储回归盘点单".to_string()),
             created_by,
-            version,
             counting_at: None,
             confirmed_at: None,
             created_at: now.clone(),
@@ -6412,53 +6147,7 @@ mod tests {
             .expect("count tenant stock logs")
     }
 
-    #[tokio::test]
-    async fn postgres_update_product_stale_expected_version_returns_4091_with_latest_snapshot() {
-        let Some(pool) = setup_pg_pool().await else {
-            return;
-        };
 
-        let repo = PostgresRepository;
-        let tenant_id = Uuid::new_v4();
-        let product_id = next_test_product_id();
-        let original = sample_product(tenant_id, product_id, 1);
-        repo.create_product(Some(&pool), &original)
-            .await
-            .expect("insert original product");
-
-        let mut first_update = original.clone();
-        first_update.name = format!("{}-first", original.name);
-        first_update.version = original.version + 1;
-        repo.update_product(Some(&pool), &first_update, Some(original.version))
-            .await
-            .expect("first update should succeed");
-
-        let mut stale_update = original.clone();
-        stale_update.name = format!("{}-stale", original.name);
-        stale_update.version = original.version + 1;
-
-        let err = repo
-            .update_product(Some(&pool), &stale_update, Some(original.version))
-            .await
-            .expect_err("second stale update should conflict");
-
-        assert_eq!(err.status, StatusCode::CONFLICT);
-        assert_eq!(err.code, 4091);
-        assert_eq!(err.data["resource"], json!("product"));
-        assert_eq!(err.data["resource_id"], json!(product_id));
-        assert_eq!(err.data["expected_version"], json!(original.version));
-        assert_eq!(err.data["current_version"], json!(first_update.version));
-        assert_eq!(
-            err.data["latest_snapshot"]["version"],
-            json!(first_update.version)
-        );
-        assert_eq!(
-            err.data["latest_snapshot"]["current_stock"],
-            json!(first_update.current_stock)
-        );
-
-        cleanup_tenant_products(&pool, tenant_id).await;
-    }
 
     #[tokio::test]
     async fn postgres_update_product_missing_resource_returns_4040_instead_of_4091() {
@@ -6472,10 +6161,9 @@ mod tests {
 
         let mut missing = sample_product(tenant_id, product_id, 1);
         missing.name = format!("{}-missing", missing.name);
-        missing.version = 2;
 
         let err = repo
-            .update_product(Some(&pool), &missing, Some(1))
+            .update_product(Some(&pool), &missing)
             .await
             .expect_err("missing product should be 404");
 
@@ -6485,126 +6173,7 @@ mod tests {
         cleanup_tenant_products(&pool, tenant_id).await;
     }
 
-    #[tokio::test]
-    async fn postgres_inbound_and_outbound_stale_expected_version_returns_4091_with_latest_snapshot()
-     {
-        let Some(pool) = setup_pg_pool().await else {
-            return;
-        };
 
-        let repo = PostgresRepository;
-        let tenant_id = Uuid::new_v4();
-        let operator_id = Uuid::new_v4();
-        ensure_operator_user(&pool, tenant_id, operator_id).await;
-
-        let product_id = next_test_product_id();
-        let original = sample_product(tenant_id, product_id, 1);
-        repo.create_product(Some(&pool), &original)
-            .await
-            .expect("insert product for inbound/outbound optimistic-lock regression");
-
-        let first_inbound = repo
-            .inbound(
-                Some(&pool),
-                tenant_id,
-                product_id,
-                5,
-                Some(Decimal::new(300, 2)),
-                Some(original.version),
-                "PO-REG-OL-001",
-                operator_id,
-            )
-            .await
-            .expect("first inbound should succeed");
-
-        let inbound_err = repo
-            .inbound(
-                Some(&pool),
-                tenant_id,
-                product_id,
-                1,
-                Some(Decimal::new(280, 2)),
-                Some(original.version),
-                "PO-REG-OL-002",
-                operator_id,
-            )
-            .await
-            .expect_err("stale inbound expected_version should conflict");
-
-        assert_eq!(inbound_err.status, StatusCode::CONFLICT);
-        assert_eq!(inbound_err.code, 4091);
-        assert_eq!(inbound_err.data["resource"], json!("product"));
-        assert_eq!(inbound_err.data["resource_id"], json!(product_id));
-        assert_eq!(
-            inbound_err.data["expected_version"],
-            json!(original.version)
-        );
-        assert_eq!(
-            inbound_err.data["current_version"],
-            json!(first_inbound.version)
-        );
-        assert_eq!(
-            inbound_err.data["latest_snapshot"]["version"],
-            json!(first_inbound.version)
-        );
-        assert_eq!(
-            inbound_err.data["latest_snapshot"]["current_stock"],
-            json!(first_inbound.current_stock)
-        );
-
-        let outbound_items = vec![(product_id, 3, None, None)];
-        let first_outbound = repo
-            .outbound(
-                Some(&pool),
-                tenant_id,
-                "SO-REG-OL-001",
-                Some(first_inbound.version),
-                &outbound_items,
-                false,
-                operator_id,
-            )
-            .await
-            .expect("first outbound should succeed");
-        assert_eq!(first_outbound.len(), 1);
-        let outbound_snapshot = first_outbound[0].clone();
-
-        let stale_outbound_items = vec![(product_id, 1, None, None)];
-        let outbound_err = repo
-            .outbound(
-                Some(&pool),
-                tenant_id,
-                "SO-REG-OL-002",
-                Some(first_inbound.version),
-                &stale_outbound_items,
-                false,
-                operator_id,
-            )
-            .await
-            .expect_err("stale outbound expected_version should conflict");
-
-        assert_eq!(outbound_err.status, StatusCode::CONFLICT);
-        assert_eq!(outbound_err.code, 4091);
-        assert_eq!(outbound_err.data["resource"], json!("product"));
-        assert_eq!(outbound_err.data["resource_id"], json!(product_id));
-        assert_eq!(
-            outbound_err.data["expected_version"],
-            json!(first_inbound.version)
-        );
-        assert_eq!(
-            outbound_err.data["current_version"],
-            json!(outbound_snapshot.version)
-        );
-        assert_eq!(
-            outbound_err.data["latest_snapshot"]["version"],
-            json!(outbound_snapshot.version)
-        );
-        assert_eq!(
-            outbound_err.data["latest_snapshot"]["current_stock"],
-            json!(outbound_snapshot.current_stock)
-        );
-
-        cleanup_inventory_fixture(&pool, tenant_id, operator_id).await;
-    }
 
     #[tokio::test]
     async fn postgres_outbound_insufficient_stock_returns_4001_without_mutating_product() {
@@ -6631,7 +6200,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 "SO-REG-STOCK-001",
-                Some(product.version),
+                None,
                 &outbound_items,
                 false,
                 operator_id,
@@ -6651,7 +6220,6 @@ mod tests {
             .expect("load latest product after failed outbound")
             .expect("product should still exist after failed outbound");
         assert_eq!(latest.current_stock, product.current_stock);
-        assert_eq!(latest.version, product.version);
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
         assert_eq!(stock_log_count, 0);
@@ -6688,21 +6256,20 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 operator_id,
                 "req_repo_pg_po_confirm_001",
             )
             .await
             .expect("first purchase-order confirm should succeed");
         assert_eq!(confirmed.status, PurchaseOrderStatus::Confirmed);
-        assert_eq!(confirmed.version, order.version + 1);
 
         let stale_err = repo
             .confirm_purchase_order(
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 operator_id,
                 "req_repo_pg_po_confirm_002",
             )
@@ -6713,15 +6280,15 @@ mod tests {
         assert_eq!(stale_err.code, 4091);
         assert_eq!(stale_err.data["resource"], json!("purchase_order"));
         assert_eq!(stale_err.data["resource_id"], json!(order_id));
-        assert_eq!(stale_err.data["expected_version"], json!(order.version));
-        assert_eq!(stale_err.data["current_version"], json!(confirmed.version));
+        assert_eq!(stale_err.data["expected_version"], json!(null));
+        assert_eq!(stale_err.data["current_version"], json!(null));
         assert_eq!(
             stale_err.data["latest_snapshot"]["status"],
             json!(confirmed.status.as_str())
         );
         assert_eq!(
             stale_err.data["latest_snapshot"]["version"],
-            json!(confirmed.version)
+            json!(null)
         );
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
@@ -6761,7 +6328,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 false,
                 operator_id,
                 "req_repo_pg_so_confirm_001",
@@ -6781,7 +6348,6 @@ mod tests {
             .expect("load latest sales-order after failed confirm")
             .expect("sales-order should still exist after failed confirm");
         assert_eq!(latest_order.status, SalesOrderStatus::Draft);
-        assert_eq!(latest_order.version, order.version);
         assert_eq!(latest_order.confirmed_at, None);
 
         let latest_product = repo
@@ -6790,7 +6356,6 @@ mod tests {
             .expect("load latest product after failed sales-order confirm")
             .expect("product should still exist after failed sales-order confirm");
         assert_eq!(latest_product.current_stock, product.current_stock);
-        assert_eq!(latest_product.version, product.version);
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
         assert_eq!(stock_log_count, 0);
@@ -6827,7 +6392,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 operator_id,
                 "req_repo_pg_po_confirm_101",
             )
@@ -6840,7 +6405,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 false,
                 operator_id,
                 "req_repo_pg_po_void_101",
@@ -6852,15 +6417,15 @@ mod tests {
         assert_eq!(stale_err.code, 4091);
         assert_eq!(stale_err.data["resource"], json!("purchase_order"));
         assert_eq!(stale_err.data["resource_id"], json!(order_id));
-        assert_eq!(stale_err.data["expected_version"], json!(order.version));
-        assert_eq!(stale_err.data["current_version"], json!(confirmed.version));
+        assert_eq!(stale_err.data["expected_version"], json!(null));
+        assert_eq!(stale_err.data["current_version"], json!(null));
         assert_eq!(
             stale_err.data["latest_snapshot"]["status"],
             json!(confirmed.status.as_str())
         );
         assert_eq!(
             stale_err.data["latest_snapshot"]["version"],
-            json!(confirmed.version)
+            json!(null)
         );
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
@@ -6900,7 +6465,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 operator_id,
                 "req_repo_pg_po_confirm_201",
             )
@@ -6921,7 +6486,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 "SO-REG-VOID-001",
-                Some(product_after_confirm.version),
+                None,
                 &outbound_items,
                 false,
                 operator_id,
@@ -6937,7 +6502,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(confirmed.version),
+                None,
                 false,
                 operator_id,
                 "req_repo_pg_po_void_201",
@@ -6960,7 +6525,6 @@ mod tests {
             .expect("load latest purchase-order after failed void")
             .expect("purchase-order should still exist after failed void");
         assert_eq!(latest_order.status, PurchaseOrderStatus::Confirmed);
-        assert_eq!(latest_order.version, confirmed.version);
         assert_eq!(latest_order.voided_at, None);
 
         let latest_product = repo
@@ -6972,7 +6536,6 @@ mod tests {
             latest_product.current_stock,
             outbound_snapshot.current_stock
         );
-        assert_eq!(latest_product.version, outbound_snapshot.version);
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
         assert_eq!(stock_log_count, 2);
@@ -7015,21 +6578,20 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 check_id,
-                Some(check.version),
+                None,
                 operator_id,
                 "req_repo_pg_sc_start_001",
             )
             .await
             .expect("first stock-check start should succeed");
         assert_eq!(started.status, StockCheckStatus::Counting);
-        assert_eq!(started.version, check.version + 1);
 
         let stale_err = repo
             .start_stock_check(
                 Some(&pool),
                 tenant_id,
                 check_id,
-                Some(check.version),
+                None,
                 operator_id,
                 "req_repo_pg_sc_start_002",
             )
@@ -7040,15 +6602,15 @@ mod tests {
         assert_eq!(stale_err.code, 4091);
         assert_eq!(stale_err.data["resource"], json!("stock_check"));
         assert_eq!(stale_err.data["resource_id"], json!(check_id));
-        assert_eq!(stale_err.data["expected_version"], json!(check.version));
-        assert_eq!(stale_err.data["current_version"], json!(started.version));
+        assert_eq!(stale_err.data["expected_version"], json!(null));
+        assert_eq!(stale_err.data["current_version"], json!(null));
         assert_eq!(
             stale_err.data["latest_snapshot"]["status"],
             json!(started.status.as_str())
         );
         assert_eq!(
             stale_err.data["latest_snapshot"]["version"],
-            json!(started.version)
+            json!(null)
         );
 
         let latest_check = repo
@@ -7057,7 +6619,6 @@ mod tests {
             .expect("load latest stock-check after failed stale start")
             .expect("stock-check should still exist after failed stale start");
         assert_eq!(latest_check.status, StockCheckStatus::Counting);
-        assert_eq!(latest_check.version, started.version);
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
         assert_eq!(stock_log_count, 0);
@@ -7101,7 +6662,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 check_id,
-                Some(check.version),
+                None,
                 operator_id,
                 "req_repo_pg_sc_confirm_001",
             )
@@ -7115,7 +6676,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 "SO-REG-SC-001",
-                Some(product.version),
+                None,
                 &outbound_items,
                 false,
                 operator_id,
@@ -7132,7 +6693,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 check_id,
-                Some(started.version),
+                None,
                 &actual_items,
                 Some("book_stock drift regression".to_string()),
                 operator_id,
@@ -7152,7 +6713,7 @@ mod tests {
         );
         assert_eq!(
             err.data["latest_snapshot"]["version"],
-            json!(drifted_product.version)
+            json!(null)
         );
 
         let latest_check = repo
@@ -7161,7 +6722,6 @@ mod tests {
             .expect("load latest stock-check after failed confirm")
             .expect("stock-check should still exist after failed confirm");
         assert_eq!(latest_check.status, StockCheckStatus::Counting);
-        assert_eq!(latest_check.version, started.version);
         assert_eq!(latest_check.confirmed_at, None);
         assert_eq!(latest_check.items.len(), 1);
         assert_eq!(latest_check.items[0].actual_stock, None);
@@ -7173,7 +6733,6 @@ mod tests {
             .expect("load latest product after failed stock-check confirm")
             .expect("product should still exist after failed stock-check confirm");
         assert_eq!(latest_product.current_stock, drifted_product.current_stock);
-        assert_eq!(latest_product.version, drifted_product.version);
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
         assert_eq!(stock_log_count, 1);
@@ -7212,7 +6771,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 false,
                 operator_id,
                 "req_repo_pg_so_void_001",
@@ -7226,7 +6785,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(confirmed.version),
+                None,
                 operator_id,
                 "req_repo_pg_so_void_002",
             )
@@ -7243,7 +6802,6 @@ mod tests {
             .expect("load latest sales-order after failed void")
             .expect("sales-order should still exist after failed void");
         assert_eq!(latest_order.status, SalesOrderStatus::Confirmed);
-        assert_eq!(latest_order.version, confirmed.version);
         assert_eq!(latest_order.voided_at, None);
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
@@ -7283,7 +6841,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 false,
                 operator_id,
                 "req_repo_pg_so_return_001",
@@ -7308,7 +6866,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(before_failed_return.version),
+                None,
                 &[(product_id, 4)],
                 Some("超额退货应失败".to_string()),
                 operator_id,
@@ -7329,7 +6887,6 @@ mod tests {
             .expect("load latest sales-order after failed return")
             .expect("sales-order should still exist after failed return");
         assert_eq!(latest_order.status, before_failed_return.status);
-        assert_eq!(latest_order.version, before_failed_return.version);
         assert_eq!(latest_order.returned_at, before_failed_return.returned_at);
         assert_eq!(latest_order.items.len(), 1);
         assert_eq!(latest_order.items[0].returned_qty, 0);
@@ -7340,7 +6897,6 @@ mod tests {
             .expect("load latest product after failed return")
             .expect("product should still exist after failed return");
         assert_eq!(latest_product.current_stock, before_product.current_stock);
-        assert_eq!(latest_product.version, before_product.version);
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
         assert_eq!(stock_log_count, 1);
@@ -7378,21 +6934,20 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 operator_id,
                 "req_repo_pg_so_void_stale_001",
             )
             .await
             .expect("first void sales-order should succeed");
         assert_eq!(voided.status, SalesOrderStatus::Voided);
-        assert_eq!(voided.version, order.version + 1);
 
         let stale_err = repo
             .void_sales_order(
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 operator_id,
                 "req_repo_pg_so_void_stale_002",
             )
@@ -7403,15 +6958,15 @@ mod tests {
         assert_eq!(stale_err.code, 4091);
         assert_eq!(stale_err.data["resource"], json!("sales_order"));
         assert_eq!(stale_err.data["resource_id"], json!(order_id));
-        assert_eq!(stale_err.data["expected_version"], json!(order.version));
-        assert_eq!(stale_err.data["current_version"], json!(voided.version));
+        assert_eq!(stale_err.data["expected_version"], json!(null));
+        assert_eq!(stale_err.data["current_version"], json!(null));
         assert_eq!(
             stale_err.data["latest_snapshot"]["status"],
             json!(voided.status.as_str())
         );
         assert_eq!(
             stale_err.data["latest_snapshot"]["version"],
-            json!(voided.version)
+            json!(null)
         );
 
         let latest_order = repo
@@ -7420,7 +6975,6 @@ mod tests {
             .expect("load latest sales-order after stale void")
             .expect("sales-order should still exist after stale void");
         assert_eq!(latest_order.status, voided.status);
-        assert_eq!(latest_order.version, voided.version);
         assert_eq!(latest_order.voided_at, voided.voided_at);
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
@@ -7460,7 +7014,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 false,
                 operator_id,
                 "req_repo_pg_so_return_stale_001",
@@ -7485,7 +7039,7 @@ mod tests {
                 Some(&pool),
                 tenant_id,
                 order_id,
-                Some(order.version),
+                None,
                 &[(product_id, 1)],
                 Some("stale return should fail".to_string()),
                 operator_id,
@@ -7498,15 +7052,15 @@ mod tests {
         assert_eq!(stale_err.code, 4091);
         assert_eq!(stale_err.data["resource"], json!("sales_order"));
         assert_eq!(stale_err.data["resource_id"], json!(order_id));
-        assert_eq!(stale_err.data["expected_version"], json!(order.version));
-        assert_eq!(stale_err.data["current_version"], json!(confirmed.version));
+        assert_eq!(stale_err.data["expected_version"], json!(null));
+        assert_eq!(stale_err.data["current_version"], json!(null));
         assert_eq!(
             stale_err.data["latest_snapshot"]["status"],
             json!(confirmed.status.as_str())
         );
         assert_eq!(
             stale_err.data["latest_snapshot"]["version"],
-            json!(confirmed.version)
+            json!(null)
         );
 
         let latest_order = repo
@@ -7515,7 +7069,6 @@ mod tests {
             .expect("load latest sales-order after stale return")
             .expect("sales-order should still exist after stale return");
         assert_eq!(latest_order.status, before_failed_return.status);
-        assert_eq!(latest_order.version, before_failed_return.version);
         assert_eq!(latest_order.returned_at, before_failed_return.returned_at);
         assert_eq!(latest_order.items.len(), before_failed_return.items.len());
         assert_eq!(
@@ -7529,7 +7082,6 @@ mod tests {
             .expect("load latest product after stale return")
             .expect("product should still exist after stale return");
         assert_eq!(latest_product.current_stock, before_product.current_stock);
-        assert_eq!(latest_product.version, before_product.version);
 
         let stock_log_count = tenant_stock_log_count(&pool, tenant_id).await;
         assert_eq!(stock_log_count, 1);
@@ -7537,3 +7089,6 @@ mod tests {
         cleanup_inventory_fixture(&pool, tenant_id, operator_id).await;
     }
 }
+
+
+

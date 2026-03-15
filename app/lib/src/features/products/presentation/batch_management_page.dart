@@ -48,7 +48,25 @@ class _BatchManagementPageState extends State<BatchManagementPage> {
 
         return Scaffold(
           appBar: AppBar(
-            title: const Text('批次管理'),
+            title: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                const Text('批次管理',
+                    style: TextStyle(
+                        fontSize: 16, fontWeight: FontWeight.w600)),
+                Text(
+                  widget.productName,
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: Theme.of(context)
+                          .colorScheme
+                          .onSurface
+                          .withValues(alpha: 0.65),
+                      fontWeight: FontWeight.normal),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ],
+            ),
             actions: <Widget>[
               // 只显示未售完切换
               FilterChip(
@@ -102,12 +120,19 @@ class _BatchManagementPageState extends State<BatchManagementPage> {
                           )
                         : ListView.builder(
                             padding: const EdgeInsets.fromLTRB(16, 12, 16, 100),
-                            itemCount: batches.length,
-                            itemBuilder: (_, int i) => _BatchCard(
-                              batch: batches[i],
-                              controller: widget.controller,
-                              onRefresh: _load,
-                            ),
+                            itemCount: batches.length + 1,
+                            itemBuilder: (_, int i) {
+                              if (i == 0) {
+                                return _ProductHeader(
+                                  productName: widget.productName,
+                                );
+                              }
+                              return _BatchCard(
+                                batch: batches[i - 1],
+                                controller: widget.controller,
+                                onRefresh: _load,
+                              );
+                            },
                           ),
           ),
         );
@@ -165,6 +190,14 @@ class _BatchCard extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 8),
+
+            // 供应商
+            if (batch.supplier != null && batch.supplier!.isNotEmpty)
+              _InfoRow(
+                icon: Icons.storefront_outlined,
+                label: '供应商',
+                value: batch.supplier!,
+              ),
 
             // 日期信息
             _InfoRow(
@@ -355,6 +388,7 @@ class _EditBatchSheet extends StatefulWidget {
 
 class _EditBatchSheetState extends State<_EditBatchSheet> {
   late final TextEditingController _lotCtrl;
+  late final TextEditingController _supplierCtrl;
   late final TextEditingController _notesCtrl;
   DateTime? _producedAt;
   DateTime? _expiresAt;
@@ -364,6 +398,8 @@ class _EditBatchSheetState extends State<_EditBatchSheet> {
   void initState() {
     super.initState();
     _lotCtrl = TextEditingController(text: widget.batch.lotNumber);
+    _supplierCtrl =
+        TextEditingController(text: widget.batch.supplier ?? '');
     _notesCtrl = TextEditingController(text: widget.batch.notes ?? '');
     _producedAt = widget.batch.producedAt;
     _expiresAt = widget.batch.expiresAt;
@@ -373,6 +409,7 @@ class _EditBatchSheetState extends State<_EditBatchSheet> {
   @override
   void dispose() {
     _lotCtrl.dispose();
+    _supplierCtrl.dispose();
     _notesCtrl.dispose();
     super.dispose();
   }
@@ -380,6 +417,9 @@ class _EditBatchSheetState extends State<_EditBatchSheet> {
   Future<void> _save() async {
     final req = UpdateBatchRequest(
       lotNumber: _lotCtrl.text.trim().isEmpty ? null : _lotCtrl.text.trim(),
+      supplier: _supplierCtrl.text.trim().isEmpty
+          ? null
+          : _supplierCtrl.text.trim(),
       producedAt: _producedAt,
       expiresAt: _hasExpiry ? _expiresAt : null,
       notes: _notesCtrl.text.trim().isEmpty ? null : _notesCtrl.text.trim(),
@@ -426,6 +466,16 @@ class _EditBatchSheetState extends State<_EditBatchSheet> {
                 decoration: const InputDecoration(
                   labelText: '批次号',
                   border: OutlineInputBorder(),
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _supplierCtrl,
+                decoration: const InputDecoration(
+                  labelText: '供应商（可选）',
+                  hintText: '输入供应商名称',
+                  border: OutlineInputBorder(),
+                  prefixIcon: Icon(Icons.storefront_outlined),
                 ),
               ),
               const SizedBox(height: 12),
@@ -524,6 +574,59 @@ class _EditBatchSheetState extends State<_EditBatchSheet> {
 // ════════════════════════════════════════════════════════════════════════════
 // 辅助 Widget
 // ════════════════════════════════════════════════════════════════════════════
+
+// 商品信息头部卡片
+class _ProductHeader extends StatelessWidget {
+  const _ProductHeader({required this.productName});
+  final String productName;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      margin: const EdgeInsets.only(bottom: 12),
+      color: cs.primaryContainer.withValues(alpha: 0.5),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 36,
+              height: 36,
+              decoration: BoxDecoration(
+                color: cs.primary.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Icon(Icons.inventory_2_rounded,
+                  size: 18, color: cs.primary),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  Text(
+                    '商品',
+                    style: TextStyle(
+                        fontSize: 11,
+                        color: cs.onSurfaceVariant,
+                        fontWeight: FontWeight.w500),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    productName,
+                    style: const TextStyle(
+                        fontSize: 14, fontWeight: FontWeight.w700),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 class _InfoRow extends StatelessWidget {
   const _InfoRow({

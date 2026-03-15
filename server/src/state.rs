@@ -63,7 +63,6 @@ impl AppState {
             retail_price: Decimal::new(350, 2),
             last_inbound_unit_cost: Some(Decimal::new(320, 2)),
             min_stock_limit: 10,
-            version: 1,
             is_deleted: false,
             category_id: None,
             track_batches: false,

@@ -11,6 +11,7 @@ import '../models/users_models.dart';
 
 const List<_RoleOption> _kRoles = <_RoleOption>[
   _RoleOption(value: 'OWNER', label: '老板', color: Color(0xFF8B5CF6)),
+  _RoleOption(value: 'ADMIN', label: '副管理员', color: Color(0xFF3B82F6)),
   _RoleOption(value: 'PURCHASER', label: '采购员', color: Color(0xFF10B981)),
   _RoleOption(value: 'SALES', label: '销售员', color: Color(0xFFF59E0B)),
 ];
@@ -32,9 +33,12 @@ class UsersPage extends StatefulWidget {
     super.key,
     required this.controller,
     required this.currentUserId,
+    required this.currentUserRole,
   });
   final UsersController controller;
   final String currentUserId;
+  /// 当前登录者的角色（用于过滤可操作用户和可分配角色）
+  final String currentUserRole;
 
   @override
   State<UsersPage> createState() => _UsersPageState();
@@ -59,7 +63,7 @@ class _UsersPageState extends State<UsersPage> {
   Future<void> _showCreateDialog() async {
     await showDialog<void>(
       context: context,
-      builder: (_) => _CreateUserDialog(controller: widget.controller),
+      builder: (_) => _CreateUserDialog(controller: widget.controller, currentUserRole: widget.currentUserRole),
     );
     final msg = widget.controller.successMessage ??
         widget.controller.errorMessage;
@@ -72,7 +76,7 @@ class _UsersPageState extends State<UsersPage> {
   Future<void> _showRoleDialog(UserData user) async {
     await showDialog<void>(
       context: context,
-      builder: (_) => _UpdateRoleDialog(controller: widget.controller, user: user),
+      builder: (_) => _UpdateRoleDialog(controller: widget.controller, user: user, currentUserRole: widget.currentUserRole),
     );
     final msg = widget.controller.successMessage ??
         widget.controller.errorMessage;
@@ -91,6 +95,36 @@ class _UsersPageState extends State<UsersPage> {
     final msg = widget.controller.successMessage ??
         widget.controller.errorMessage;
     if (msg != null) {
+      _showSnack(msg);
+      widget.controller.clearMessages();
+    }
+  }
+
+  Future<void> _showDeleteDialog(UserData user) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: Text('删除「${user.name}」'),
+        content: Text('确定要删除员工「${user.name}」（@${user.username}）吗？此操作不可撤销。'),
+        actions: <Widget>[
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            style: FilledButton.styleFrom(backgroundColor: Colors.red),
+            onPressed: () => Navigator.pop(ctx, true),
+            child: const Text('确认删除'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true) return;
+    final ok = await widget.controller.deleteUser(user.id, user.name);
+    final msg = ok
+        ? widget.controller.successMessage
+        : widget.controller.errorMessage;
+    if (msg != null && mounted) {
       _showSnack(msg);
       widget.controller.clearMessages();
     }
@@ -143,8 +177,10 @@ class _UsersPageState extends State<UsersPage> {
                     (UserData u) => _UserCard(
                       user: u,
                       isSelf: u.id == widget.currentUserId,
+                      currentUserRole: widget.currentUserRole,
                       onRoleTap: () => _showRoleDialog(u),
                       onPwdTap: () => _showResetPwdDialog(u),
+                      onDeleteTap: () => _showDeleteDialog(u),
                     ),
                   ),
               ],
@@ -285,14 +321,31 @@ class _UserCard extends StatelessWidget {
   const _UserCard({
     required this.user,
     required this.isSelf,
+    required this.currentUserRole,
     required this.onRoleTap,
     required this.onPwdTap,
+    required this.onDeleteTap,
   });
 
   final UserData user;
   final bool isSelf;
+  final String currentUserRole;
   final VoidCallback onRoleTap;
   final VoidCallback onPwdTap;
+  final VoidCallback onDeleteTap;
+
+  /// 角色层级（数值越大权限越高）
+  int _roleRank(String role) {
+    switch (role.toUpperCase()) {
+      case 'OWNER': return 100;
+      case 'ADMIN': return 50;
+      default: return 10;
+    }
+  }
+
+  /// 操作者是否有权管理目标用户（层级必须高于目标）
+  bool _canManage(String targetRole) =>
+      _roleRank(currentUserRole) > _roleRank(targetRole);
 
   Color _roleColor() {
     for (final r in _kRoles) {
@@ -392,7 +445,8 @@ class _UserCard extends StatelessWidget {
               icon: const Icon(Icons.more_vert, size: 20),
               tooltip: '操作',
               itemBuilder: (_) => <PopupMenuEntry<String>>[
-                if (!isSelf)
+                // 修改角色：非自己 且 操作者层级 > 目标层级
+                if (!isSelf && _canManage(user.role))
                   const PopupMenuItem<String>(
                     value: 'role',
                     child: Row(
@@ -403,20 +457,43 @@ class _UserCard extends StatelessWidget {
                       ],
                     ),
                   ),
-                const PopupMenuItem<String>(
-                  value: 'pwd',
-                  child: Row(
-                    children: <Widget>[
-                      Icon(Icons.lock_reset_rounded, size: 18),
-                      SizedBox(width: 8),
-                      Text('重置密码'),
-                    ],
+                // 重置密码：非自己 且 操作者层级 > 目标层级
+                if (!isSelf && _canManage(user.role))
+                  const PopupMenuItem<String>(
+                    value: 'pwd',
+                    child: Row(
+                      children: <Widget>[
+                        Icon(Icons.lock_reset_rounded, size: 18),
+                        SizedBox(width: 8),
+                        Text('重置密码'),
+                      ],
+                    ),
                   ),
-                ),
+                // 删除：非自己 且 操作者层级 > 目标层级
+                if (!isSelf && _canManage(user.role))
+                  const PopupMenuItem<String>(
+                    value: 'delete',
+                    child: Row(
+                      children: <Widget>[
+                        Icon(Icons.person_remove_rounded, size: 18, color: Colors.red),
+                        SizedBox(width: 8),
+                        Text('删除员工', style: TextStyle(color: Colors.red)),
+                      ],
+                    ),
+                  ),
+                // 自己只能看，没有操作项时显示提示
+                if (isSelf || !_canManage(user.role))
+                  const PopupMenuItem<String>(
+                    value: '',
+                    enabled: false,
+                    child: Text('无可用操作',
+                        style: TextStyle(fontSize: 13)),
+                  ),
               ],
               onSelected: (v) {
                 if (v == 'role') onRoleTap();
                 if (v == 'pwd') onPwdTap();
+                if (v == 'delete') onDeleteTap();
               },
             ),
           ],
@@ -507,8 +584,9 @@ class _EmptyState extends StatelessWidget {
 // ════════════════════════════════════════════════════════════════════════════
 
 class _CreateUserDialog extends StatefulWidget {
-  const _CreateUserDialog({required this.controller});
+  const _CreateUserDialog({required this.controller, required this.currentUserRole});
   final UsersController controller;
+  final String currentUserRole;
 
   @override
   State<_CreateUserDialog> createState() => _CreateUserDialogState();
@@ -628,7 +706,17 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
             const SizedBox(height: 8),
             Wrap(
               spacing: 8,
-              children: _kRoles.map((r) {
+              children: _kRoles.where((r) {
+                // OWNER 不可由普通操作者分配
+                int rank(String role) {
+                  switch (role.toUpperCase()) {
+                    case 'OWNER': return 100;
+                    case 'ADMIN': return 50;
+                    default: return 10;
+                  }
+                }
+                return rank(widget.currentUserRole) > rank(r.value);
+              }).map((r) {
                 final selected = _selectedRole == r.value;
                 return ChoiceChip(
                   label: Text(r.label),
@@ -693,9 +781,11 @@ class _CreateUserDialogState extends State<_CreateUserDialog> {
 
 class _UpdateRoleDialog extends StatefulWidget {
   const _UpdateRoleDialog(
-      {required this.controller, required this.user});
+      {required this.controller, required this.user, required this.currentUserRole});
   final UsersController controller;
   final UserData user;
+  /// 操作者角色，用于过滤可分配的角色选项
+  final String currentUserRole;
 
   @override
   State<_UpdateRoleDialog> createState() => _UpdateRoleDialogState();
@@ -720,9 +810,22 @@ class _UpdateRoleDialogState extends State<_UpdateRoleDialog> {
     if (ok && mounted) Navigator.pop(context);
   }
 
+  int _roleRank(String role) {
+    switch (role.toUpperCase()) {
+      case 'OWNER': return 100;
+      case 'ADMIN': return 50;
+      default: return 10;
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final ctrl = widget.controller;
+    // 过滤：操作者只能分配比自己层级低的角色
+    final assignable = _kRoles
+        .where((r) => _roleRank(widget.currentUserRole) > _roleRank(r.value))
+        .toList();
+
     return AlertDialog(
       title: Text('修改「${widget.user.name}」角色'),
       contentPadding: const EdgeInsets.fromLTRB(24, 16, 24, 0),
@@ -730,7 +833,7 @@ class _UpdateRoleDialogState extends State<_UpdateRoleDialog> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
-          ..._kRoles.map((r) {
+          ...assignable.map((r) {
             return Row(
               children: <Widget>[
                 Radio<String>(
@@ -787,11 +890,13 @@ class _UpdateRoleDialogState extends State<_UpdateRoleDialog> {
   String _roleDesc(String role) {
     switch (role) {
       case 'OWNER':
-        return '全部功能，包含人员管理';
+        return '老板：全部功能，包含人员管理（唯一）';
+      case 'ADMIN':
+        return '副管理员：全部业务功能，可管理采购员/销售员';
       case 'PURCHASER':
-        return '采购入库、库存盘点、商品管理';
+        return '采购员：采购入库、库存盘点、商品管理';
       case 'SALES':
-        return '销售出库、销售趋势、订单下钻';
+        return '销售员：销售出库、销售趋势、订单下钻';
       default:
         return '';
     }

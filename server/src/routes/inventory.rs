@@ -10,7 +10,7 @@ use serde_json::json;
 use crate::routes::common::{
     InboundBatchRequest, InboundRequest, InventoryBatchItemResultData, InventoryBatchResultData,
     InventoryResultData, ListLowStockAlertsQuery, LowStockAlertData, OutboundItemResult,
-    ensure_role, generate_server_biz_no, parse_decimal, postgres_pool_or_none, product_snapshot,
+    ensure_role, generate_server_biz_no, parse_decimal, postgres_pool_or_none,
     require_idempotency_key, resolve_product_id, save_idempotency_record,
     save_idempotency_record_sync, try_idempotent_replay,
 };
@@ -130,7 +130,7 @@ pub async fn inbound(
     AppJson(req): AppJson<InboundRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     let idempotency_key = require_idempotency_key(&headers, &request_id)?;
     let request_payload = serde_json::to_value(&req).map_err(|_| {
@@ -206,7 +206,6 @@ pub async fn inbound(
                 resolved_product_id,
                 req.qty,
                 unit_cost,
-                req.expected_version,
                 &biz_no,
                 auth.user_id,
             )
@@ -218,7 +217,6 @@ pub async fn inbound(
             product_id: updated.id,
             current_stock: updated.current_stock,
             cost_price: updated.cost_price.round_dp(4).to_string(),
-            version: updated.version,
             track_batches: updated.track_batches,
         };
 
@@ -249,20 +247,6 @@ pub async fn inbound(
         return Err(AppError::not_found("商品不存在").with_request_id(request_id));
     }
 
-    if let Some(expected_version) = req.expected_version
-        && expected_version != product.version
-    {
-        return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-            .with_data(json!({
-                "resource": "product",
-                "resource_id": product.id,
-                "expected_version": expected_version,
-                "current_version": product.version,
-                "latest_snapshot": product_snapshot(product)
-            }))
-            .with_request_id(request_id));
-    }
-
     let old_stock = product.current_stock;
     let old_cost = product.cost_price;
     let new_stock = old_stock + req.qty;
@@ -279,7 +263,6 @@ pub async fn inbound(
     product.current_stock = new_stock;
     product.cost_price = new_cost;
     product.last_inbound_unit_cost = Some(effective_unit_cost.round_dp(4));
-    product.version += 1;
     let updated = product.clone();
     drop(products);
 
@@ -308,7 +291,6 @@ pub async fn inbound(
         product_id: updated.id,
         current_stock: updated.current_stock,
         cost_price: updated.cost_price.round_dp(4).to_string(),
-        version: updated.version,
         track_batches: updated.track_batches,
     };
 
@@ -333,7 +315,7 @@ pub async fn inbound_batch(
     AppJson(req): AppJson<InboundBatchRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     let idempotency_key = require_idempotency_key(&headers, &request_id)?;
     let request_payload = serde_json::to_value(&req).map_err(|_| {
@@ -423,7 +405,6 @@ pub async fn inbound_batch(
                     product_id: p.id,
                     current_stock: p.current_stock,
                     cost_price: p.cost_price.round_dp(4).to_string(),
-                    version: p.version,
                     track_batches: p.track_batches,
                 })
                 .collect(),
@@ -471,20 +452,6 @@ pub async fn inbound_batch(
             return Err(AppError::not_found("商品不存在").with_request_id(request_id));
         }
 
-        if let Some(ev) = item.expected_version
-            && ev != product.version
-        {
-            return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-                .with_data(json!({
-                    "resource": "product",
-                    "resource_id": product.id,
-                    "expected_version": ev,
-                    "current_version": product.version,
-                    "latest_snapshot": product_snapshot(product)
-                }))
-                .with_request_id(request_id));
-        }
-
         let parsed_unit_cost = item
             .unit_cost
             .as_deref()
@@ -520,13 +487,11 @@ pub async fn inbound_batch(
         product.current_stock = new_stock;
         product.cost_price = new_cost;
         product.last_inbound_unit_cost = Some(effective_unit_cost.round_dp(4));
-        product.version += 1;
 
         result_items.push(InventoryBatchItemResultData {
             product_id: product.id,
             current_stock: product.current_stock,
             cost_price: product.cost_price.round_dp(4).to_string(),
-            version: product.version,
             track_batches: product.track_batches,
         });
 
@@ -589,7 +554,7 @@ pub async fn outbound(
     AppJson(req): AppJson<crate::routes::common::OutboundRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "SALES"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "SALES"], &request_id)?;
 
     let idempotency_key = require_idempotency_key(&headers, &request_id)?;
     let request_payload = serde_json::to_value(&req).map_err(|_| {
@@ -664,7 +629,6 @@ pub async fn outbound(
                 product_id: product.id,
                 qty: item.qty,
                 current_stock: product.current_stock,
-                version: product.version,
             });
         }
 
@@ -705,20 +669,7 @@ pub async fn outbound(
             return Err(AppError::not_found("商品不存在").with_request_id(request_id));
         }
 
-        let expected_version = item.expected_version.or(req.expected_version);
-        if let Some(ev) = expected_version
-            && ev != product.version
-        {
-            return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-                .with_data(json!({
-                    "resource": "product",
-                    "resource_id": product.id,
-                    "expected_version": ev,
-                    "current_version": product.version,
-                    "latest_snapshot": product_snapshot(product)
-                }))
-                .with_request_id(request_id));
-        }
+
 
         if !state.config.allow_negative_stock && product.current_stock < item.qty {
             return Err(
@@ -746,7 +697,6 @@ pub async fn outbound(
             .ok_or_else(|| AppError::not_found("商品不存在").with_request_id(request_id.clone()))?;
 
         product.current_stock -= item.qty;
-        product.version += 1;
 
         stock_logs.push(StockLog::now(
             next_log_id,
@@ -767,7 +717,6 @@ pub async fn outbound(
             product_id: product.id,
             qty: item.qty,
             current_stock: product.current_stock,
-            version: product.version,
         });
     }
 

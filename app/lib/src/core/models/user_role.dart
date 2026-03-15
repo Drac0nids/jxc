@@ -1,5 +1,6 @@
 enum UserRole {
   owner,
+  admin,
   purchaser,
   sales,
   unknown;
@@ -8,6 +9,8 @@ enum UserRole {
     switch (value.toUpperCase()) {
       case 'OWNER':
         return UserRole.owner;
+      case 'ADMIN':
+        return UserRole.admin;
       case 'PURCHASER':
         return UserRole.purchaser;
       case 'SALES':
@@ -21,6 +24,8 @@ enum UserRole {
     switch (this) {
       case UserRole.owner:
         return 'OWNER';
+      case UserRole.admin:
+        return 'ADMIN';
       case UserRole.purchaser:
         return 'PURCHASER';
       case UserRole.sales:
@@ -34,6 +39,8 @@ enum UserRole {
     switch (this) {
       case UserRole.owner:
         return '老板';
+      case UserRole.admin:
+        return '副管理员';
       case UserRole.purchaser:
         return '采购员';
       case UserRole.sales:

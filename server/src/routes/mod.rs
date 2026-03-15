@@ -16,7 +16,7 @@ use axum::{
     Json, Router,
     http::{HeaderMap, StatusCode},
     response::{IntoResponse, Response},
-    routing::{get, patch, post, put},
+    routing::{delete, get, patch, post, put},
 };
 use serde_json::json;
 
@@ -37,6 +37,7 @@ pub fn protected_routes() -> Router<AppState> {
         .route("/auth/logout", post(auth::logout))
         .route("/users", get(users::list_users).post(users::create_user))
         .route("/users/:id/role", patch(users::update_user_role))
+        .route("/users/:id", delete(users::delete_user))
         .route(
             "/users/:id/reset-password",
             post(users::reset_user_password),

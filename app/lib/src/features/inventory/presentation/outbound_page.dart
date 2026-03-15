@@ -9,7 +9,7 @@ import '../../../storage/session_storage.dart';
 import '../application/outbound_controller.dart';
 import '../models/inventory_models.dart';
 
-enum _OutboundScanMode { scanConfirm, continuousScan }
+enum OutboundScanMode { scanConfirm, continuousScan }
 
 class OutboundPage extends StatefulWidget {
   const OutboundPage({
@@ -18,12 +18,18 @@ class OutboundPage extends StatefulWidget {
     required this.sessionStorage,
     required this.scanPreferenceScope,
     this.onViewHistory,
+    this.autoScan = false,
+    this.initialScanMode,
   });
 
   final OutboundController controller;
   final SessionStorage sessionStorage;
   final String scanPreferenceScope;
   final VoidCallback? onViewHistory;
+  /// 进入页面后自动触发摄像头扫码
+  final bool autoScan;
+  /// 预设扫码模式（仅当 autoScan=true 时生效）
+  final OutboundScanMode? initialScanMode;
 
   @override
   State<OutboundPage> createState() => _OutboundPageState();
@@ -50,7 +56,7 @@ class _OutboundPageState extends State<OutboundPage> {
   int _itemSeed = 1;
   final List<_OutboundItemEditors> _itemEditors = <_OutboundItemEditors>[];
 
-  _OutboundScanMode _scanMode = _OutboundScanMode.scanConfirm;
+  OutboundScanMode _scanMode = OutboundScanMode.scanConfirm;
   String _scanConfirmProductId = '';
   String _scanConfirmProductName = '';
   bool _scanConfirmSessionActive = false;
@@ -66,27 +72,46 @@ class _OutboundPageState extends State<OutboundPage> {
     _restoreStoredScanMode();
   }
 
+  // 如果传入了 autoScan，在页面建立后自动触发摔像头
+  void _scheduleAutoScanIfNeeded() {
+    if (!widget.autoScan) return;
+    if (!mounted) return;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!widget.controller.canSubmit) return;
+      if (widget.initialScanMode != null) {
+        setState(() => _scanMode = widget.initialScanMode!);
+      }
+      if (_scanMode == OutboundScanMode.continuousScan) {
+        unawaited(_startContinuousScanSession());
+      } else {
+        unawaited(_scanWithCamera());
+      }
+    });
+  }
+
   Future<void> _restoreStoredScanMode() async {
     final storedMode = await widget.sessionStorage.readScanMode(
       scope: widget.scanPreferenceScope,
       page: 'outbound',
     );
     final normalizedStoredMode = storedMode?.trim();
-    final parsedMode = _modeFromStorage(normalizedStoredMode);
-    if (!mounted || parsedMode == null) {
-      return;
+    // initialScanMode 优先，否则仏存储记录
+    final parsedMode = widget.initialScanMode ??
+        _modeFromStorage(normalizedStoredMode);
+    if (!mounted) return;
+    if (parsedMode != null) {
+      setState(() {
+        _scanMode = parsedMode;
+      });
     }
-
-    setState(() {
-      _scanMode = parsedMode;
-    });
-
-    if (normalizedStoredMode != _modeToStorage(parsedMode)) {
-      unawaited(_persistScanMode(parsedMode));
+    if (normalizedStoredMode != _modeToStorage(_scanMode)) {
+      unawaited(_persistScanMode(_scanMode));
     }
+    _scheduleAutoScanIfNeeded();
   }
 
-  Future<void> _persistScanMode(_OutboundScanMode mode) {
+  Future<void> _persistScanMode(OutboundScanMode mode) {
     return widget.sessionStorage.writeScanMode(
       scope: widget.scanPreferenceScope,
       page: 'outbound',
@@ -94,23 +119,23 @@ class _OutboundPageState extends State<OutboundPage> {
     );
   }
 
-  String _modeToStorage(_OutboundScanMode mode) {
+  String _modeToStorage(OutboundScanMode mode) {
     switch (mode) {
-      case _OutboundScanMode.scanConfirm:
+      case OutboundScanMode.scanConfirm:
         return 'scan_confirm';
-      case _OutboundScanMode.continuousScan:
+      case OutboundScanMode.continuousScan:
         return 'continuous_scan';
     }
   }
 
-  _OutboundScanMode? _modeFromStorage(String? value) {
+  OutboundScanMode? _modeFromStorage(String? value) {
     switch (value?.trim()) {
       case 'quick_accumulate':
-        return _OutboundScanMode.continuousScan;
+        return OutboundScanMode.continuousScan;
       case 'scan_confirm':
-        return _OutboundScanMode.scanConfirm;
+        return OutboundScanMode.scanConfirm;
       case 'continuous_scan':
-        return _OutboundScanMode.continuousScan;
+        return OutboundScanMode.continuousScan;
       default:
         return null;
     }
@@ -154,13 +179,6 @@ class _OutboundPageState extends State<OutboundPage> {
           body: ListView(
             padding: const EdgeInsets.all(16),
             children: <Widget>[
-              const BrandHeroBanner(
-                title: '销售出库作业',
-                subtitle: '支持扫码确认、连续扫码会话',
-                icon: Icons.local_shipping_rounded,
-                gradientSeedColor: Color(0xFFF59E0B),
-              ),
-              const SizedBox(height: 12),
               if (!widget.controller.canSubmit)
                 const StatusNotice(
                   message: '当前角色无销售出库权限，仅 OWNER/SALES 可操作。',
@@ -182,47 +200,11 @@ class _OutboundPageState extends State<OutboundPage> {
 
   Widget _buildScanCard(BuildContext context) {
     return SectionCard(
-      title: '条码出库',
-      subtitle: '支持确认写入与连续扫码会话',
+      title: '扫码',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Text(
-            '扫码模式',
-            style: Theme.of(context).textTheme.labelLarge,
-          ),
-          const SizedBox(height: 6),
-          Wrap(
-            spacing: 8,
-            runSpacing: 8,
-            children: <Widget>[
-              ChoiceChip(
-                label: const Text('确认写入（默认）'),
-                selected: _scanMode == _OutboundScanMode.scanConfirm,
-                onSelected:
-                    widget.controller.scanning || widget.controller.submitting
-                        ? null
-                        : (bool selected) {
-                            if (selected) {
-                              _onScanModeChanged(_OutboundScanMode.scanConfirm);
-                            }
-                          },
-              ),
-              ChoiceChip(
-                label: const Text('连续扫码会话'),
-                selected: _scanMode == _OutboundScanMode.continuousScan,
-                onSelected: widget.controller.scanning ||
-                        widget.controller.submitting
-                    ? null
-                    : (bool selected) {
-                        if (selected) {
-                          _onScanModeChanged(_OutboundScanMode.continuousScan);
-                        }
-                      },
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
+        children: <Widget>[        const SizedBox(height: 4),
+
           TextField(
             controller: _scanBarcodeController,
             focusNode: _scanBarcodeFocusNode,
@@ -266,7 +248,7 @@ class _OutboundPageState extends State<OutboundPage> {
                     ? null
                     : _onPrimaryScanPressed,
                 child: Text(
-                  _scanMode == _OutboundScanMode.continuousScan
+                  _scanMode == OutboundScanMode.continuousScan
                       ? (_continuousSessionActive ? '会话扫码中...' : '开始连续扫码')
                       : (widget.controller.scanning ? '识别中...' : '按条码处理'),
                 ),
@@ -278,7 +260,7 @@ class _OutboundPageState extends State<OutboundPage> {
                         : _resetScan,
                 child: const Text('清空'),
               ),
-              if (_scanMode == _OutboundScanMode.scanConfirm &&
+              if (_scanMode == OutboundScanMode.scanConfirm &&
                   _scanConfirmSessionActive)
                 OutlinedButton(
                   onPressed:
@@ -291,7 +273,7 @@ class _OutboundPageState extends State<OutboundPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            _scanMode == _OutboundScanMode.continuousScan
+            _scanMode == OutboundScanMode.continuousScan
                 ? '连续扫码会话：${_continuousSessionActive ? '进行中' : '未开始'}，已处理 $_continuousProcessedCount 条。'
                 : '确认续扫会话：${_scanConfirmSessionActive ? '进行中' : '未开始'}，已处理 $_scanConfirmProcessedCount 条。',
           ),
@@ -536,22 +518,9 @@ class _OutboundPageState extends State<OutboundPage> {
     );
   }
 
-  void _onScanModeChanged(_OutboundScanMode value) {
-    setState(() {
-      _scanMode = value;
-      if (value != _OutboundScanMode.scanConfirm) {
-        _scanConfirmSessionActive = false;
-        _scanConfirmProcessedCount = 0;
-      }
-      if (value != _OutboundScanMode.continuousScan) {
-        _continuousSessionActive = false;
-      }
-    });
-    unawaited(_persistScanMode(value));
-  }
 
   Future<void> _onPrimaryScanPressed() async {
-    if (_scanMode != _OutboundScanMode.continuousScan &&
+    if (_scanMode != OutboundScanMode.continuousScan &&
         _scanBarcodeController.text.trim().isEmpty) {
       await _scanWithCamera();
       return;
@@ -562,17 +531,17 @@ class _OutboundPageState extends State<OutboundPage> {
 
   Future<void> _scanByCurrentMode() async {
     switch (_scanMode) {
-      case _OutboundScanMode.scanConfirm:
+      case OutboundScanMode.scanConfirm:
         await _scanForConfirm();
         return;
-      case _OutboundScanMode.continuousScan:
+      case OutboundScanMode.continuousScan:
         await _startContinuousScanSession();
         return;
     }
   }
 
   void _onScanBarcodeSubmitted(String _) {
-    if (_scanMode == _OutboundScanMode.continuousScan ||
+    if (_scanMode == OutboundScanMode.continuousScan ||
         widget.controller.scanning ||
         widget.controller.submitting ||
         !widget.controller.canSubmit) {
@@ -686,7 +655,7 @@ class _OutboundPageState extends State<OutboundPage> {
 
     FocusScope.of(context).unfocus();
 
-    if (_scanMode == _OutboundScanMode.continuousScan) {
+    if (_scanMode == OutboundScanMode.continuousScan) {
       await _startContinuousScanSession();
       return;
     }
@@ -811,14 +780,14 @@ class _OutboundPageState extends State<OutboundPage> {
     );
 
     setState(() {
-      if (_scanMode == _OutboundScanMode.scanConfirm) {
+      if (_scanMode == OutboundScanMode.scanConfirm) {
         _scanConfirmSessionActive = true;
         _scanConfirmProcessedCount += 1;
       }
     });
 
     _scanBarcodeController.clear();
-    if (_scanMode == _OutboundScanMode.scanConfirm) {
+    if (_scanMode == OutboundScanMode.scanConfirm) {
       _showSnack('确认写入成功，确认续扫会话进行中（已处理 $_scanConfirmProcessedCount 条）');
       _scanBarcodeFocusNode.requestFocus();
     }

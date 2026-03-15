@@ -11,7 +11,7 @@ use std::time::Duration;
 use crate::routes::common::{
     BarcodeLookupData, BarcodeLookupQuery, CreateProductRequest, DeleteProductQuery,
     ListProductsQuery, ScanProductData, ScanQuery, UpdateProductRequest, barcode_scope_key,
-    ensure_role, parse_decimal, parse_required_text, postgres_pool_or_none, product_snapshot,
+    ensure_role, parse_decimal, parse_required_text, postgres_pool_or_none,
     require_idempotency_key, save_idempotency_record, save_idempotency_record_sync,
     to_product_data, try_idempotent_replay,
 };
@@ -116,7 +116,7 @@ pub async fn barcode_lookup_product_name(
     Query(query): Query<BarcodeLookupQuery>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER", "SALES"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER", "SALES"], &request_id)?;
 
     let barcode = query.barcode.trim();
     if barcode.is_empty() {
@@ -317,7 +317,6 @@ pub async fn scan_product(
         } else {
             Some(product.cost_price.round_dp(4).to_string())
         },
-        version: product.version,
         min_stock_limit: product.min_stock_limit,
     };
 
@@ -489,7 +488,7 @@ pub async fn create_product(
     AppJson(req): AppJson<CreateProductRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     let idempotency_key = require_idempotency_key(&headers, &request_id)?;
     let request_payload = serde_json::to_value(&req).map_err(|_| {
@@ -581,7 +580,6 @@ pub async fn create_product(
                 None
             },
             min_stock_limit,
-            version: 1,
             is_deleted: false,
             category_id: req.category_id,
             track_batches: req.track_batches.unwrap_or(false),
@@ -663,7 +661,6 @@ pub async fn create_product(
             None
         },
         min_stock_limit,
-        version: 1,
         is_deleted: false,
         category_id: None, // 内存模式不支持分类
         track_batches: false,
@@ -716,7 +713,7 @@ pub async fn update_product(
     AppJson(req): AppJson<UpdateProductRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     let idempotency_key = require_idempotency_key(&headers, &request_id)?;
     let request_payload = serde_json::to_value(&req).map_err(|_| {
@@ -781,19 +778,7 @@ pub async fn update_product(
             .await?
             .ok_or_else(|| AppError::not_found("商品不存在").with_request_id(request_id.clone()))?;
 
-        if let Some(expected_version) = req.expected_version
-            && expected_version != existing.version
-        {
-            return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-                .with_data(json!({
-                    "resource": "product",
-                    "resource_id": existing.id,
-                    "expected_version": expected_version,
-                    "current_version": existing.version,
-                    "latest_snapshot": product_snapshot(&existing)
-                }))
-                .with_request_id(request_id));
-        }
+
 
         let new_sku = sku.unwrap_or_else(|| existing.sku.clone());
         let new_barcode = barcode.unwrap_or_else(|| existing.barcode.clone());
@@ -837,7 +822,6 @@ pub async fn update_product(
             retail_price: new_retail_price.round_dp(4),
             last_inbound_unit_cost: existing.last_inbound_unit_cost,
             min_stock_limit: new_min_stock_limit,
-            version: existing.version + 1,
             is_deleted: existing.is_deleted,
             category_id: req.category_id.or(existing.category_id),
             track_batches: req.track_batches.unwrap_or(existing.track_batches),
@@ -845,7 +829,7 @@ pub async fn update_product(
 
         state
             .repository
-            .update_product(pool, &updated, req.expected_version)
+            .update_product(pool, &updated)
             .await?;
 
         let body = ApiResponse::success(to_product_data(&updated, false), request_id.clone());
@@ -879,19 +863,7 @@ pub async fn update_product(
         return Err(AppError::not_found("商品不存在").with_request_id(request_id));
     }
 
-    if let Some(expected_version) = req.expected_version
-        && expected_version != existing.version
-    {
-        return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-            .with_data(json!({
-                "resource": "product",
-                "resource_id": existing.id,
-                "expected_version": expected_version,
-                "current_version": existing.version,
-                "latest_snapshot": product_snapshot(&existing)
-            }))
-            .with_request_id(request_id));
-    }
+
 
     let new_sku = sku.unwrap_or_else(|| existing.sku.clone());
     let new_barcode = barcode.unwrap_or_else(|| existing.barcode.clone());
@@ -934,7 +906,6 @@ pub async fn update_product(
     product.unit = new_unit;
     product.retail_price = new_retail_price.round_dp(4);
     product.min_stock_limit = new_min_stock_limit;
-    product.version += 1;
     if let Some(tb) = req.track_batches {
         product.track_batches = tb;
     }
@@ -972,7 +943,7 @@ pub async fn delete_product(
     Query(query): Query<DeleteProductQuery>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     let idempotency_key = require_idempotency_key(&headers, &request_id)?;
     let request_payload = serde_json::to_value(&query).map_err(|_| {
@@ -997,19 +968,7 @@ pub async fn delete_product(
             .await?
             .ok_or_else(|| AppError::not_found("商品不存在").with_request_id(request_id.clone()))?;
 
-        if let Some(expected_version) = query.expected_version
-            && expected_version != existing.version
-        {
-            return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-                .with_data(json!({
-                    "resource": "product",
-                    "resource_id": existing.id,
-                    "expected_version": expected_version,
-                    "current_version": existing.version,
-                    "latest_snapshot": product_snapshot(&existing)
-                }))
-                .with_request_id(request_id));
-        }
+
 
         if existing.current_stock > 0 {
             return Err(AppError::conflict(4090, "存在库存，无法删除商品")
@@ -1023,17 +982,15 @@ pub async fn delete_product(
 
         let mut deleted = existing.clone();
         deleted.is_deleted = true;
-        deleted.version += 1;
         state
             .repository
-            .update_product(pool, &deleted, query.expected_version)
+            .update_product(pool, &deleted)
             .await?;
 
         let body = ApiResponse::success(
             json!({
                 "id": id,
-                "deleted": true,
-                "version": deleted.version
+                "deleted": true
             }),
             request_id.clone(),
         );
@@ -1063,19 +1020,7 @@ pub async fn delete_product(
         return Err(AppError::not_found("商品不存在").with_request_id(request_id));
     }
 
-    if let Some(expected_version) = query.expected_version
-        && expected_version != existing.version
-    {
-        return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-            .with_data(json!({
-                "resource": "product",
-                "resource_id": existing.id,
-                "expected_version": expected_version,
-                "current_version": existing.version,
-                "latest_snapshot": product_snapshot(&existing)
-            }))
-            .with_request_id(request_id));
-    }
+
 
     if existing.current_stock > 0 {
         return Err(AppError::conflict(4090, "存在库存，无法删除商品")
@@ -1091,15 +1036,12 @@ pub async fn delete_product(
         .get_mut(&id)
         .ok_or_else(|| AppError::not_found("商品不存在").with_request_id(request_id.clone()))?;
     product.is_deleted = true;
-    product.version += 1;
-    let version = product.version;
     drop(products);
 
     let body = ApiResponse::success(
         json!({
             "id": id,
-            "deleted": true,
-            "version": version
+            "deleted": true
         }),
         request_id.clone(),
     );

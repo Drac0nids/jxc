@@ -18,7 +18,6 @@ import '../../products/application/category_controller.dart';
 import '../../products/application/low_stock_controller.dart';
 import '../../products/application/product_controller.dart';
 import '../../products/application/supplier_controller.dart';
-import '../../products/models/batch_models.dart';
 import '../../products/presentation/batch_management_page.dart';
 import '../../products/presentation/low_stock_page.dart';
 import '../../products/presentation/products_page.dart';
@@ -45,6 +44,9 @@ enum _QuickActionType {
   products,
   users,
 }
+
+/// 首页「作业入口」扫码模式标记（用于区分确认写入 vs 连续扫码）
+enum _ScanModeEntry { scanConfirm, continuousScan }
 
 class _QuickActionItem {
   const _QuickActionItem({
@@ -116,6 +118,13 @@ class _DashboardPageState extends State<DashboardPage>
     with WidgetsBindingObserver {
   static const int _defaultPageSize = 10;
 
+  // 当前底部 Tab：0=看板  1=功能（默认）  2=我的
+  int _currentTabIndex = 1;
+
+  // PageController 用于左右滑动切换
+  late final PageController _pageController =
+      PageController(initialPage: _currentTabIndex);
+
   // Selected query date (DateTime for consistency with brand_ui pattern)
   DateTime _queryDate = DateUtils.dateOnly(DateTime.now());
 
@@ -134,6 +143,7 @@ class _DashboardPageState extends State<DashboardPage>
 
   @override
   void dispose() {
+    _pageController.dispose();
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
   }
@@ -319,6 +329,7 @@ class _DashboardPageState extends State<DashboardPage>
             scanPreferenceScope: scope,
             logsController: widget.inboundLogsController,
             batchController: widget.batchController,
+            supplierController: widget.supplierController,
           ),
         ));
         if (mounted) _load(); // 入库可能改变库存/成本，强制刷新
@@ -364,7 +375,6 @@ class _DashboardPageState extends State<DashboardPage>
             controller: widget.productController,
             categoryController: widget.categoryController,
             batchController: widget.batchController,
-            supplierController: widget.supplierController,
             onStockCheck: (int productId) {
               Navigator.of(context).push(MaterialPageRoute<void>(
                 builder: (_) => StockCheckPage(
@@ -383,13 +393,79 @@ class _DashboardPageState extends State<DashboardPage>
 
       case _QuickActionType.users:
         final selfId = widget.sessionController.session?.user.id ?? '';
+        final selfRole = widget.sessionController.session?.user.role.serverValue ?? 'SALES';
         await Navigator.of(context).push(MaterialPageRoute<void>(
           builder: (_) => UsersPage(
             controller: widget.usersController,
             currentUserId: selfId,
+            currentUserRole: selfRole,
           ),
         ));
         // 人员管理返回无需刷新看板数据
+    }
+  }
+
+  /// 从首页直接以指定扫码模式进入出库/入库页，自动触发摄像头
+  Future<void> _navigateWithScan(
+    _QuickActionType type,
+    _ScanModeEntry mode,
+  ) async {
+    final session = widget.sessionController.session;
+    final scope = session == null
+        ? ''
+        : '${session.tenantId}:${session.user.id}';
+
+    final bool continuous = mode == _ScanModeEntry.continuousScan;
+
+    switch (type) {
+      case _QuickActionType.outbound:
+        await Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => OutboundPage(
+            controller: widget.outboundController,
+            sessionStorage: widget.sessionStorage,
+            scanPreferenceScope: scope,
+            autoScan: true,
+            initialScanMode: continuous
+                ? OutboundScanMode.continuousScan
+                : OutboundScanMode.scanConfirm,
+            onViewHistory: () {
+              final now = DateTime.now();
+              final today =
+                  '${now.year.toString().padLeft(4, '0')}-${now.month.toString().padLeft(2, '0')}-${now.day.toString().padLeft(2, '0')}';
+              Navigator.of(context).push(MaterialPageRoute<void>(
+                builder: (_) => DashboardOrdersPage(
+                  controller: widget.dashboardOrdersController,
+                  initialStartDate: today,
+                  initialEndDate: today,
+                  initialPageSize: 10,
+                ),
+              ));
+            },
+          ),
+        ));
+        if (mounted) _load();
+
+      case _QuickActionType.inbound:
+        await Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => InboundPage(
+            controller: widget.inboundController,
+            productController: widget.productController,
+            sessionStorage: widget.sessionStorage,
+            scanPreferenceScope: scope,
+            logsController: widget.inboundLogsController,
+            batchController: widget.batchController,
+            supplierController: widget.supplierController,
+            autoScan: true,
+            initialScanMode: continuous
+                ? InboundScanMode.continuousScan
+                : InboundScanMode.scanConfirm,
+          ),
+        ));
+        if (mounted) _load();
+
+      default:
+        // 其他类型走普通跳转
+        await _handleQuickActionTap(type);
     }
   }
 
@@ -407,6 +483,7 @@ class _DashboardPageState extends State<DashboardPage>
         final dashboard = widget.dashboardController.data;
         final role = session?.user.role ?? UserRole.unknown;
         final loading = widget.dashboardController.loading;
+        final isOwner = role == UserRole.owner;
 
         // ── Role-based permissions ──
         final canInbound =
@@ -419,7 +496,7 @@ class _DashboardPageState extends State<DashboardPage>
             role == UserRole.purchaser ||
             role == UserRole.sales;
 
-        // Only show actions the user actually has access to
+        // 功能 Tab 快捷入口（人员管理移至「我的」Tab）
         final List<_QuickActionItem> quickActions = <_QuickActionItem>[
           if (canOutbound)
             const _QuickActionItem(
@@ -457,16 +534,6 @@ class _DashboardPageState extends State<DashboardPage>
               color: Color(0xFF64748B),
               enabled: true,
             ),
-          // 人员管理 — OWNER 专属
-          if (role == UserRole.owner)
-            const _QuickActionItem(
-              type: _QuickActionType.users,
-              title: '人员管理',
-              subtitle: '添加员工 / 角色 / 密码',
-              icon: Icons.manage_accounts_rounded,
-              color: Color(0xFF8B5CF6),
-              enabled: true,
-            ),
         ];
 
         final isToday = DateUtils.isSameDay(
@@ -475,198 +542,439 @@ class _DashboardPageState extends State<DashboardPage>
             _queryDate,
             DateUtils.dateOnly(
                 DateTime.now().subtract(const Duration(days: 1))));
-        // Dynamic prefix: 今日 / 昨日 / M月D日
         final String datePrefix = isToday
             ? '今日'
             : isYesterday
                 ? '昨日'
                 : '${_queryDate.month}月${_queryDate.day}日';
 
+        // ── AppBar 标题随 Tab 变化 ──
+        final String appBarTitle = switch (_currentTabIndex) {
+          0 => isToday ? '经营看板 · 今天' : '经营看板 · ${_friendlyDate(_queryDate)}',
+          1 => '功能',
+          _ => '我的',
+        };
+
         return Scaffold(
           appBar: AppBar(
-            // P3: Show query date in title
-            title: Text(
-              isToday
-                  ? '经营看板 · 今天'
-                  : '经营看板 · ${_friendlyDate(_queryDate)}',
-              style: const TextStyle(fontSize: 17),
-            ),
+            title: Text(appBarTitle,
+                style: const TextStyle(fontSize: 17)),
             actions: <Widget>[
-              IconButton(
-                tooltip: '刷新',
-                onPressed: loading ? null : _load,
-                icon: const Icon(Icons.refresh),
-              ),
-              // P1: Move logout to overflow menu to avoid misclick
-              PopupMenuButton<String>(
-                icon: const Icon(Icons.more_vert),
-                tooltip: '更多',
-                itemBuilder: (_) => <PopupMenuEntry<String>>[
-                  const PopupMenuItem<String>(
-                    value: 'logout',
-                    child: Row(
-                      children: <Widget>[
-                        Icon(Icons.logout, size: 18),
-                        SizedBox(width: 8),
-                        Text('退出登录'),
-                      ],
-                    ),
-                  ),
-                ],
-                onSelected: (v) async {
-                  if (v == 'logout') {
-                    await widget.sessionController.logout();
-                  }
-                },
-              ),
-              const SizedBox(width: 4),
+              if (_currentTabIndex == 0)
+                IconButton(
+                  tooltip: '刷新',
+                  onPressed: loading ? null : _load,
+                  icon: const Icon(Icons.refresh),
+                ),
             ],
           ),
-          body: RefreshIndicator(
-            onRefresh: _load,
-            child: ListView(
-              padding: const EdgeInsets.all(16),
-              children: <Widget>[
-                // ── User Identity Card ─────────────────────────────────────
-                // P1: Remove tenantId, only show name + chinese role
-                if (session != null)
-                  _IdentityCard(
-                    name: session.user.name,
-                    roleLabel: role.chineseLabel,
-                  ),
-                const SizedBox(height: 12),
 
-                // ── Date Selector (compact) ────────────────────────────────
-                // P1: Replace heavy SectionCard with inline chip row + date button
-                _DateSelectorBar(
-                  queryDate: _queryDate,
-                  loading: loading,
-                  fmtDate: _fmtDate,
-                  onPickDate: _pickDate,
-                  onApplyDate: _applyDate,
-                ),
-                const SizedBox(height: 12),
+          // ── 底部导航栏 ──────────────────────────────────────────────────
+          bottomNavigationBar: NavigationBar(
+            selectedIndex: _currentTabIndex,
+            onDestinationSelected: (int i) {
+              setState(() => _currentTabIndex = i);
+              _pageController.animateToPage(
+                i,
+                duration: const Duration(milliseconds: 280),
+                curve: Curves.easeInOut,
+              );
+            },
+            destinations: const <NavigationDestination>[
+              NavigationDestination(
+                icon: Icon(Icons.bar_chart_outlined),
+                selectedIcon: Icon(Icons.bar_chart_rounded),
+                label: '看板',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.apps_outlined),
+                selectedIcon: Icon(Icons.apps_rounded),
+                label: '功能',
+              ),
+              NavigationDestination(
+                icon: Icon(Icons.person_outline_rounded),
+                selectedIcon: Icon(Icons.person_rounded),
+                label: '我的',
+              ),
+            ],
+          ),
 
-                // ── Error ──────────────────────────────────────────────────
-                if (widget.dashboardController.errorMessage != null)
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 8),
-                    child: StatusNotice(
-                      message: widget.dashboardController.errorMessage!,
-                      tone: NoticeTone.error,
-                    ),
-                  ),
+          body: PageView(
+            controller: _pageController,
+            onPageChanged: (int i) => setState(() => _currentTabIndex = i),
+            children: <Widget>[
 
-                // ── Metric Cards ───────────────────────────────────────────
-                // P2: 5 skeleton bones when loading
-                if (loading)
-                  const _DashboardSkeleton()
-                else if (dashboard != null) ...<Widget>[
-                  _MetricCard(
-                    title: '$datePrefix销售额',
-                    value: dashboard.totalSales,
-                    icon: Icons.payments_rounded,
-                    accentColor: const Color(0xFF10B981),
-                    isCurrency: true,
-                    onTap: () => _handleSalesTap(role, dashboard),
-                  ),
-                  _MetricCard(
-                    title: '$datePrefix毛利润',
-                    value: dashboard.totalGrossProfit,
-                    icon: Icons.trending_up_rounded,
-                    accentColor: const Color(0xFF3B82F6),
-                    isCurrency: true,
-                    onTap: () => _handleProfitTap(role, dashboard),
-                  ),
-                  _MetricCard(
-                    title: '$datePrefix订单数',
-                    value: '${dashboard.totalOrders}',
-                    icon: Icons.receipt_long_rounded,
-                    accentColor: const Color(0xFFF59E0B),
-                    onTap: () =>
-                        _handleOrdersMetricTap(role, dashboard),
-                  ),
-                  // P2: Low stock — alert color when > 0
-                  _MetricCard(
-                    title: '低库存商品',
-                    value: '${dashboard.lowStockCount}',
-                    icon: Icons.warning_amber_rounded,
-                    accentColor: dashboard.lowStockCount > 0
-                        ? const Color(0xFFEF4444)
-                        : const Color(0xFF10B981),
-                    isAlert: dashboard.lowStockCount > 0,
-                    onTap: _handleLowStockTap,
-                  ),
-                  _MetricCard(
-                    title: '热销商品',
-                    value: dashboard.topSellingItem,
-                    icon: Icons.local_fire_department_rounded,
-                    accentColor: const Color(0xFFF97316),
-                    onTap: _handleTopSalesTap,
-                  ),
-                ],
-                const SizedBox(height: 16),
-
-                // ── 临期批次预警 ██████████████████████████████████████████
-                AnimatedBuilder(
-                  animation: widget.batchController,
-                  builder: (_, __) {
-                    final expiring = widget.batchController.expiring;
-                    final loading = widget.batchController.loading;
-                    // 加载中时不渲染（避免闪烁）
-                    if (loading && expiring.isEmpty) return const SizedBox.shrink();
-                    return _ExpiringBatchesCard(
-                      items: expiring,
-                      onViewAll: (int productId, String productName) {
-                        Navigator.of(context).push(MaterialPageRoute<void>(
-                          builder: (_) => BatchManagementPage(
-                            productId: productId,
-                            productName: productName,
-                            controller: widget.batchController,
+              // ══════════════════════════════════════════════════════════════
+              // Tab 0: 看板
+              // ══════════════════════════════════════════════════════════════
+              _KeepAlivePage(
+                child: RefreshIndicator(
+                  onRefresh: _load,
+                  child: ListView(
+                    padding: const EdgeInsets.all(16),
+                    children: <Widget>[
+                      _DateSelectorBar(
+                        queryDate: _queryDate,
+                        loading: loading,
+                        fmtDate: _fmtDate,
+                        onPickDate: _pickDate,
+                        onApplyDate: _applyDate,
+                      ),
+                      const SizedBox(height: 12),
+                      if (widget.dashboardController.errorMessage != null)
+                        Padding(
+                          padding: const EdgeInsets.only(bottom: 8),
+                          child: StatusNotice(
+                            message: widget.dashboardController.errorMessage!,
+                            tone: NoticeTone.error,
                           ),
-                        ));
-                      },
-                    );
-                  },
+                        ),
+                      if (loading)
+                        const _DashboardSkeleton()
+                      else if (dashboard != null) ...<Widget>[
+                        _MetricCard(
+                          title: '$datePrefix销售额',
+                          value: dashboard.totalSales,
+                          icon: Icons.payments_rounded,
+                          accentColor: const Color(0xFF10B981),
+                          isCurrency: true,
+                          onTap: () => _handleSalesTap(role, dashboard),
+                        ),
+                        _MetricCard(
+                          title: '$datePrefix毛利润',
+                          value: dashboard.totalGrossProfit,
+                          icon: Icons.trending_up_rounded,
+                          accentColor: const Color(0xFF3B82F6),
+                          isCurrency: true,
+                          onTap: () => _handleProfitTap(role, dashboard),
+                        ),
+                        _MetricCard(
+                          title: '$datePrefix订单数',
+                          value: '${dashboard.totalOrders}',
+                          icon: Icons.receipt_long_rounded,
+                          accentColor: const Color(0xFFF59E0B),
+                          onTap: () => _handleOrdersMetricTap(role, dashboard),
+                        ),
+                        _MetricCard(
+                          title: '热销商品',
+                          value: dashboard.topSellingItem,
+                          icon: Icons.local_fire_department_rounded,
+                          accentColor: const Color(0xFFF97316),
+                          onTap: _handleTopSalesTap,
+                        ),
+                      ],
+                      const SizedBox(height: 16),
+                    ],
+                  ),
+              ),  // end _KeepAlivePage Tab0
                 ),
-                const SizedBox(height: 16),
 
-                // ── Quick Actions ──────────────────────────────────────────
-                // P1: Only render actions user actually has access to
-                SectionCard(
-                  title: '高频作业入口',
-                  subtitle: '按角色显示可用功能',
-                  child: quickActions.isEmpty
-                      ? const Padding(
-                          padding: EdgeInsets.symmetric(vertical: 16),
-                          child: Center(
-                              child: Text('当前角色暂无可用操作',
-                                  style: TextStyle(
-                                      color: Color(0xFF94A3B8)))),
-                        )
-                      : GridView.builder(
+              // ══════════════════════════════════════════════════════════════
+              // Tab 1: 功能
+              // ══════════════════════════════════════════════════════════════
+              _KeepAlivePage(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
+                  children: <Widget>[
+                    if (session != null) ...<Widget>[
+                      _IdentityCard(
+                        name: session.user.name,
+                        roleLabel: role.chineseLabel,
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+
+                    // ── 预警提醒（常驻显示）────────────────────────────────
+                    const _SectionTitle(label: '预警提醒'),
+                    const SizedBox(height: 8),
+                    // 低库存预警
+                    if (dashboard != null)
+                      _AlertStatusTile(
+                        icon: Icons.inventory_2_outlined,
+                        alertColor: const Color(0xFFEF4444),
+                        okColor: const Color(0xFF10B981),
+                        isAlert: dashboard.lowStockCount > 0,
+                        alertTitle: '低库存商品',
+                        alertSubtitle:
+                            '${dashboard.lowStockCount} 件商品库存不足，建议尽快补货',
+                        okTitle: '库存充足',
+                        okSubtitle: '无低库存商品，状态良好',
+                        onTap: dashboard.lowStockCount > 0
+                            ? _handleLowStockTap
+                            : null,
+                      )
+                    else
+                      const _AlertStatusTile(
+                        icon: Icons.inventory_2_outlined,
+                        alertColor: Color(0xFFEF4444),
+                        okColor: Color(0xFF10B981),
+                        isAlert: false,
+                        alertTitle: '库存充足',
+                        alertSubtitle: '',
+                        okTitle: '库存加载中...',
+                        okSubtitle: '正在获取库存数据',
+                        onTap: null,
+                      ),
+                    const SizedBox(height: 8),
+                    // 临期批次预警
+                    AnimatedBuilder(
+                      animation: widget.batchController,
+                      builder: (BuildContext ctx, _) {
+                        final expiring = widget.batchController.expiring;
+                        final batchLoading = widget.batchController.loading;
+                        if (batchLoading && expiring.isEmpty) {
+                          return const _AlertStatusTile(
+                            icon: Icons.schedule_rounded,
+                            alertColor: Color(0xFFF59E0B),
+                            okColor: Color(0xFF10B981),
+                            isAlert: false,
+                            alertTitle: '批次健康',
+                            alertSubtitle: '',
+                            okTitle: '批次加载中...',
+                            okSubtitle: '正在检查临期批次',
+                            onTap: null,
+                          );
+                        }
+                        return _AlertStatusTile(
+                          icon: Icons.schedule_rounded,
+                          alertColor: const Color(0xFFF59E0B),
+                          okColor: const Color(0xFF10B981),
+                          isAlert: expiring.isNotEmpty,
+                          alertTitle: '临期批次提醒',
+                          alertSubtitle:
+                              '${expiring.length} 个批次将于 30 天内到期，请尽快处理',
+                          okTitle: '批次健康',
+                          okSubtitle: '30 天内无临期批次',
+                          onTap: expiring.isEmpty
+                              ? null
+                              : () {
+                                  final first = expiring.first;
+                                  Navigator.of(ctx)
+                                      .push(MaterialPageRoute<void>(
+                                    builder: (_) => BatchManagementPage(
+                                      productId: first.batch.productId,
+                                      productName: first.productName,
+                                      controller: widget.batchController,
+                                    ),
+                                  ));
+                                },
+                        );
+                      },
+                    ),
+                    const SizedBox(height: 20),
+
+
+                    // ── 作业入口（模块化） ───────────────────────────────────
+                    if (quickActions.isEmpty)
+                      const Center(
+                        child: Padding(
+                          padding: EdgeInsets.symmetric(vertical: 32),
+                          child: Text(
+                            '当前角色暂无可用操作',
+                            style: TextStyle(color: Color(0xFF94A3B8)),
+                          ),
+                        ),
+                      )
+                    else ...<Widget>[
+                      // ── 销售出库模块 ──────────────────────────────
+                      if (canOutbound) ...<Widget>[
+                        const _SectionTitle(label: '销售出库'),
+                        const SizedBox(height: 8),
+                        _ScanModuleCard(
+                          confirmLabel: '确认写入出库',
+                          confirmSubtitle: '扫一件，确认数量/单价后写入',
+                          continuousLabel: '连续扫码出库',
+                          continuousSubtitle: '摄像头持续开启，批量快速录入',
+                          color: const Color(0xFFF59E0B),
+                          icon: Icons.local_shipping_rounded,
+                          onConfirm: () => _navigateWithScan(
+                              _QuickActionType.outbound,
+                              _ScanModeEntry.scanConfirm),
+                          onContinuous: () => _navigateWithScan(
+                              _QuickActionType.outbound,
+                              _ScanModeEntry.continuousScan),
+                          onFull: () => _handleQuickActionTap(
+                              _QuickActionType.outbound),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
+                      // ── 采购入库模块 ──────────────────────────────
+                      if (canInbound) ...<Widget>[
+                        const _SectionTitle(label: '采购入库'),
+                        const SizedBox(height: 8),
+                        _ScanModuleCard(
+                          confirmLabel: '确认写入入库',
+                          confirmSubtitle: '扫一件，确认数量/成本后写入',
+                          continuousLabel: '连续扫码入库',
+                          continuousSubtitle: '摄像头持续开启，批量快速录入',
+                          color: const Color(0xFF10B981),
+                          icon: Icons.move_to_inbox_rounded,
+                          onConfirm: () => _navigateWithScan(
+                              _QuickActionType.inbound,
+                              _ScanModeEntry.scanConfirm),
+                          onContinuous: () => _navigateWithScan(
+                              _QuickActionType.inbound,
+                              _ScanModeEntry.continuousScan),
+                          onFull: () => _handleQuickActionTap(
+                              _QuickActionType.inbound),
+                        ),
+                        const SizedBox(height: 12),
+                      ],
+
+                      // ── 其他作业（盘点 / 商品）────────────────────
+                      if (canStockCheck || canProducts) ...<Widget>[
+                        const _SectionTitle(label: '其他作业'),
+                        const SizedBox(height: 8),
+                        GridView.count(
                           shrinkWrap: true,
                           physics: const NeverScrollableScrollPhysics(),
-                          gridDelegate:
-                              const SliverGridDelegateWithFixedCrossAxisCount(
-                            crossAxisCount: 2,
-                            mainAxisSpacing: 10,
-                            crossAxisSpacing: 10,
-                            childAspectRatio: 1.85,
-                          ),
-                          itemCount: quickActions.length,
-                          itemBuilder: (_, int i) =>
+                          crossAxisCount: 2,
+                          mainAxisSpacing: 10,
+                          crossAxisSpacing: 10,
+                          childAspectRatio: 1.9,
+                          children: <Widget>[
+                            if (canStockCheck)
                               _QuickActionCard(
-                                item: quickActions[i],
-                                onTap: () =>
-                                    _handleQuickActionTap(
-                                        quickActions[i].type),
+                                item: const _QuickActionItem(
+                                  type: _QuickActionType.stockCheck,
+                                  title: '库存盘点',
+                                  subtitle: '盘盈盘亏确认',
+                                  icon: Icons.fact_check_rounded,
+                                  color: Color(0xFF8B5CF6),
+                                  enabled: true,
+                                ),
+                                onTap: () => _handleQuickActionTap(
+                                    _QuickActionType.stockCheck),
                               ),
+                            if (canProducts)
+                              _QuickActionCard(
+                                item: const _QuickActionItem(
+                                  type: _QuickActionType.products,
+                                  title: '商品管理',
+                                  subtitle: '建档/查询/维护',
+                                  icon: Icons.inventory_2_rounded,
+                                  color: Color(0xFF64748B),
+                                  enabled: true,
+                                ),
+                                onTap: () => _handleQuickActionTap(
+                                    _QuickActionType.products),
+                              ),
+                          ],
                         ),
+                      ],
+                    ],
+                  ],
                 ),
-                const SizedBox(height: 16),
-              ],
-            ),
+              ),  // end _KeepAlivePage Tab1
+
+              // ══════════════════════════════════════════════════════════════
+              // Tab 2: 我的
+              // ══════════════════════════════════════════════════════════════
+              _KeepAlivePage(
+                child: ListView(
+                  padding: const EdgeInsets.fromLTRB(16, 20, 16, 32),
+                  children: <Widget>[
+                    if (session != null) ...<Widget>[
+                      _ProfileHeader(
+                        name: session.user.name,
+                        roleLabel: role.chineseLabel,
+                      ),
+                      const SizedBox(height: 28),
+                    ],
+  
+                    // 系统管理 —— 仅 OWNER
+                    if (isOwner) ...<Widget>[
+                      const _SectionTitle(label: '系统管理'),
+                      const SizedBox(height: 8),
+                      _ProfileTile(
+                        icon: Icons.manage_accounts_rounded,
+                        color: const Color(0xFF8B5CF6),
+                        title: '人员管理',
+                        subtitle: '添加员工、分配角色、重置密码',
+                        onTap: () {
+                          final selfId =
+                              widget.sessionController.session?.user.id ?? '';
+                          final selfRole =
+                              widget.sessionController.session?.user.role.serverValue ?? 'SALES';
+                          Navigator.of(context).push(MaterialPageRoute<void>(
+                            builder: (_) => UsersPage(
+                              controller: widget.usersController,
+                              currentUserId: selfId,
+                              currentUserRole: selfRole,
+                            ),
+                          ));
+                        },
+                      ),
+                      const SizedBox(height: 20),
+                    ],
+  
+                    // 关于
+                    const _SectionTitle(label: '关于'),
+                    const SizedBox(height: 8),
+                    const _ProfileTile(
+                      icon: Icons.info_outline_rounded,
+                      color: Color(0xFF64748B),
+                      title: '极速云进销存',
+                      subtitle: '版本 0.1.0',
+                      onTap: null,
+                    ),
+                    const SizedBox(height: 32),
+  
+                    // 退出登录
+                    SizedBox(
+                      width: double.infinity,
+                      child: OutlinedButton.icon(
+                        onPressed: () async {
+                          final bool confirmed = await showDialog<bool>(
+                                context: context,
+                                builder: (_) => AlertDialog(
+                                  title: const Text('确认退出'),
+                                  content: const Text('退出后需要重新登录。'),
+                                  actions: <Widget>[
+                                    TextButton(
+                                      onPressed: () =>
+                                          Navigator.of(context).pop(false),
+                                      child: const Text('取消'),
+                                    ),
+                                    FilledButton(
+                                      style: FilledButton.styleFrom(
+                                        backgroundColor: Theme.of(context)
+                                            .colorScheme
+                                            .error,
+                                      ),
+                                      onPressed: () =>
+                                          Navigator.of(context).pop(true),
+                                      child: const Text('退出'),
+                                    ),
+                                  ],
+                                ),
+                              ) ??
+                              false;
+                          if (confirmed) {
+                            await widget.sessionController.logout();
+                          }
+                        },
+                        style: OutlinedButton.styleFrom(
+                          foregroundColor:
+                              Theme.of(context).colorScheme.error,
+                          side: BorderSide(
+                            color: Theme.of(context)
+                                .colorScheme
+                                .error
+                                .withValues(alpha: 0.5),
+                          ),
+                          padding:
+                              const EdgeInsets.symmetric(vertical: 14),
+                        ),
+                        icon: const Icon(Icons.logout_rounded),
+                        label: const Text('退出登录'),
+                      ),
+                    ),
+                  ],
+                ),  // close ListView
+              ),  // end _KeepAlivePage Tab2
+            ],
           ),
         );
       },
@@ -675,175 +983,7 @@ class _DashboardPageState extends State<DashboardPage>
 }
 
 // ════════════════════════════════════════════════════════════════════════════
-// 临期批次预警卡片
 // ════════════════════════════════════════════════════════════════════════════
-
-class _ExpiringBatchesCard extends StatelessWidget {
-  const _ExpiringBatchesCard({
-    required this.items,
-    required this.onViewAll,
-  });
-
-  final List<ExpiringBatchData> items;
-  final void Function(int productId, String productName) onViewAll;
-
-  @override
-  Widget build(BuildContext context) {
-    if (items.isEmpty) {
-      // 空状态：绿色安全提示
-      return SectionCard(
-        title: '批次效期监控',
-        subtitle: '30天内到期提醒',
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 12, horizontal: 4),
-          child: Row(
-            children: <Widget>[
-              Container(
-                width: 36,
-                height: 36,
-                decoration: BoxDecoration(
-                  color: const Color(0xFF10B981).withAlpha(26),
-                  shape: BoxShape.circle,
-                ),
-                child: const Icon(
-                  Icons.verified_rounded,
-                  color: Color(0xFF10B981),
-                  size: 20,
-                ),
-              ),
-              const SizedBox(width: 12),
-              const Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: <Widget>[
-                    Text(
-                      '暂无临期批次',
-                      style: TextStyle(
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                        color: Color(0xFF10B981),
-                      ),
-                    ),
-                    SizedBox(height: 2),
-                    Text(
-                      '近 30 天内所有批次均安全',
-                      style: TextStyle(fontSize: 12, color: Colors.grey),
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
-        ),
-      );
-    }
-
-    return SectionCard(
-      title: '批次效期监控',
-      subtitle: '${items.length} 个批次需关注',
-      child: Column(
-        children: <Widget>[
-          for (final ExpiringBatchData item in items.take(5))
-            _ExpiringRow(
-              item: item,
-              onViewAll: onViewAll,
-            ),
-          if (items.length > 5)
-            Padding(
-              padding: const EdgeInsets.only(top: 4),
-              child: Center(
-                child: Text(
-                  '还有 ${items.length - 5} 条预警未显示',
-                  style: const TextStyle(
-                      fontSize: 12, color: Colors.grey),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
-
-class _ExpiringRow extends StatelessWidget {
-  const _ExpiringRow({
-    required this.item,
-    required this.onViewAll,
-  });
-
-  final ExpiringBatchData item;
-  final void Function(int, String) onViewAll;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
-    final batch = item.batch;
-    final level = batch.expiryLevel;
-    final color = switch (level) {
-      BatchExpiryLevel.expired => Colors.grey.shade600,
-      BatchExpiryLevel.critical => Colors.red.shade600,
-      BatchExpiryLevel.warning => Colors.orange.shade600,
-      _ => Colors.amber.shade700,
-    };
-    final statusText = switch (level) {
-      BatchExpiryLevel.expired => '已过期',
-      _ => '${batch.daysUntilExpiry}天后过期',
-    };
-
-    return Container(
-      margin: const EdgeInsets.only(bottom: 8),
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: color.withAlpha(15),
-        borderRadius: BorderRadius.circular(8),
-        border: Border.all(color: color.withAlpha(51)),
-      ),
-      child: Row(
-        children: <Widget>[
-          Container(
-            width: 4,
-            height: 40,
-            decoration: BoxDecoration(
-              color: color,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          const SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: <Widget>[
-                Text(
-                  item.productName,
-                  style: const TextStyle(
-                      fontSize: 13, fontWeight: FontWeight.w600),
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 2),
-                Text(
-                  '批次：${batch.lotNumber}  ·  $statusText',
-                  style: TextStyle(fontSize: 11, color: color),
-                ),
-              ],
-            ),
-          ),
-          const SizedBox(width: 8),
-          GestureDetector(
-            onTap: () => onViewAll(batch.productId, item.productName),
-            child: Text(
-              '查看',
-              style: TextStyle(
-                  fontSize: 12,
-                  color: cs.primary,
-                  fontWeight: FontWeight.w500),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
 
 // ════════════════════════════════════════════════════════════════════════════
 // Identity Card
@@ -1255,6 +1395,414 @@ class _DashboardSkeleton extends StatelessWidget {
             ),
           ],
         ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// _ProfileHeader — 「我的」Tab 顶部用户头像卡
+// ════════════════════════════════════════════════════════════════════════════
+
+class _ProfileHeader extends StatelessWidget {
+  const _ProfileHeader({required this.name, required this.roleLabel});
+  final String name;
+  final String roleLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Column(
+      children: <Widget>[
+        CircleAvatar(
+          radius: 36,
+          backgroundColor: cs.primary.withValues(alpha: 0.15),
+          child: Text(
+            name.isNotEmpty ? name[0] : '?',
+            style: TextStyle(
+              fontSize: 28,
+              fontWeight: FontWeight.w800,
+              color: cs.primary,
+            ),
+          ),
+        ),
+        const SizedBox(height: 12),
+        Text(
+          name,
+          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w800),
+        ),
+        const SizedBox(height: 4),
+        Container(
+          padding:
+              const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+          decoration: BoxDecoration(
+            color: cs.primary.withValues(alpha: 0.1),
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Text(
+            roleLabel,
+            style: TextStyle(
+              fontSize: 13,
+              fontWeight: FontWeight.w600,
+              color: cs.primary,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// _SectionTitle — 分组标题
+// ════════════════════════════════════════════════════════════════════════════
+
+class _SectionTitle extends StatelessWidget {
+  const _SectionTitle({required this.label});
+  final String label;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      label,
+      style: TextStyle(
+        fontSize: 13,
+        fontWeight: FontWeight.w600,
+        color: Theme.of(context).colorScheme.onSurfaceVariant,
+        letterSpacing: 0.4,
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// _ProfileTile — 列表项（带图标、标题、副标题、箭头）
+// ════════════════════════════════════════════════════════════════════════════
+
+class _ProfileTile extends StatelessWidget {
+  const _ProfileTile({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.subtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String subtitle;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 40,
+                height: 40,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 22),
+              ),
+              const SizedBox(width: 14),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      style: const TextStyle(
+                          fontWeight: FontWeight.w600, fontSize: 15),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                          fontSize: 12, color: cs.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              if (onTap != null)
+                Icon(Icons.chevron_right_rounded,
+                    size: 20, color: cs.onSurfaceVariant),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// _KeepAlivePage — 保持 PageView 子页不被销毁（保留滚动位置）
+// ════════════════════════════════════════════════════════════════════════════
+
+class _KeepAlivePage extends StatefulWidget {
+  const _KeepAlivePage({required this.child});
+  final Widget child;
+
+  @override
+  State<_KeepAlivePage> createState() => _KeepAlivePageState();
+}
+
+class _KeepAlivePageState extends State<_KeepAlivePage>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
+    return widget.child;
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// _AlertStatusTile — 预警状态 Tile（有问题=警告色，无问题=绿色健康）
+// ════════════════════════════════════════════════════════════════════════════
+
+class _AlertStatusTile extends StatelessWidget {
+  const _AlertStatusTile({
+    required this.icon,
+    required this.alertColor,
+    required this.okColor,
+    required this.isAlert,
+    required this.alertTitle,
+    required this.alertSubtitle,
+    required this.okTitle,
+    required this.okSubtitle,
+    required this.onTap,
+  });
+
+  final IconData icon;
+  final Color alertColor;
+  final Color okColor;
+  final bool isAlert;
+  final String alertTitle;
+  final String alertSubtitle;
+  final String okTitle;
+  final String okSubtitle;
+  final VoidCallback? onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final color = isAlert ? alertColor : okColor;
+    final title = isAlert ? alertTitle : okTitle;
+    final subtitle = isAlert ? alertSubtitle : okSubtitle;
+    final cs = Theme.of(context).colorScheme;
+
+    return Card(
+      margin: EdgeInsets.zero,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          child: Row(
+            children: <Widget>[
+              Container(
+                width: 38,
+                height: 38,
+                decoration: BoxDecoration(
+                  color: color.withValues(alpha: 0.12),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Icon(icon, color: color, size: 20),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      style: TextStyle(
+                        fontWeight: FontWeight.w600,
+                        fontSize: 14,
+                        color: isAlert ? color : null,
+                      ),
+                    ),
+                    if (subtitle.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 2),
+                      Text(
+                        subtitle,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: cs.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+              if (onTap != null)
+                Icon(Icons.chevron_right_rounded,
+                    size: 18, color: cs.onSurfaceVariant)
+              else
+                Icon(
+                  isAlert
+                      ? Icons.error_outline_rounded
+                      : Icons.check_circle_outline_rounded,
+                  size: 18,
+                  color: color.withValues(alpha: 0.7),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ════════════════════════════════════════════════════════════════════════════
+// _ScanModuleCard — 扫码模块入口卡（含两种模式 + 完整表单入口）
+// ════════════════════════════════════════════════════════════════════════════
+
+class _ScanModuleCard extends StatelessWidget {
+  const _ScanModuleCard({
+    required this.confirmLabel,
+    required this.confirmSubtitle,
+    required this.continuousLabel,
+    required this.continuousSubtitle,
+    required this.color,
+    required this.icon,
+    required this.onConfirm,
+    required this.onContinuous,
+    required this.onFull,
+  });
+
+  final String confirmLabel;
+  final String confirmSubtitle;
+  final String continuousLabel;
+  final String continuousSubtitle;
+  final Color color;
+  final IconData icon;
+  final VoidCallback onConfirm;
+  final VoidCallback onContinuous;
+  final VoidCallback onFull;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Card(
+      margin: EdgeInsets.zero,
+      child: Column(
+        children: <Widget>[
+          // 确认写入
+          InkWell(
+            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            onTap: onConfirm,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: <Widget>[
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.qr_code_scanner_rounded,
+                        size: 18, color: color),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(confirmLabel,
+                            style: const TextStyle(
+                                fontSize: 14, fontWeight: FontWeight.w600)),
+                        Text(confirmSubtitle,
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: cs.onSurfaceVariant)),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 18, color: cs.onSurfaceVariant),
+                ],
+              ),
+            ),
+          ),
+          Divider(height: 1, indent: 62, color: cs.outlineVariant),
+          // 连续扫码
+          InkWell(
+            onTap: onContinuous,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+              child: Row(
+                children: <Widget>[
+                  Container(
+                    width: 36,
+                    height: 36,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(Icons.repeat_rounded, size: 18, color: color),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: <Widget>[
+                        Text(continuousLabel,
+                            style: const TextStyle(
+                                fontSize: 14, fontWeight: FontWeight.w600)),
+                        Text(continuousSubtitle,
+                            style: TextStyle(
+                                fontSize: 12,
+                                color: cs.onSurfaceVariant)),
+                      ],
+                    ),
+                  ),
+                  Icon(Icons.chevron_right_rounded,
+                      size: 18, color: cs.onSurfaceVariant),
+                ],
+              ),
+            ),
+          ),
+          Divider(height: 1, indent: 62, color: cs.outlineVariant),
+          // 完整表单入口
+          InkWell(
+            borderRadius:
+                const BorderRadius.vertical(bottom: Radius.circular(12)),
+            onTap: onFull,
+            child: Padding(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+              child: Row(
+                children: <Widget>[
+                  const SizedBox(width: 48),
+                  Text('进入完整表单',
+                      style: TextStyle(
+                          fontSize: 12,
+                          color: cs.onSurfaceVariant)),
+                  const Spacer(),
+                  Icon(Icons.open_in_new_rounded,
+                      size: 14, color: cs.onSurfaceVariant),
+                ],
+              ),
+            ),
+          ),
+        ],
       ),
     );
   }

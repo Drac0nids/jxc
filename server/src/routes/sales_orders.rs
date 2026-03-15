@@ -10,7 +10,7 @@ use serde_json::json;
 use crate::routes::common::{
     OrderActionRequest, SalesOrderCreateRequest, SalesOrderReturnRequest, append_audit_log,
     ensure_role, generate_server_biz_no, parse_decimal, postgres_pool_or_none,
-    require_idempotency_key, sales_order_snapshot, save_idempotency_record,
+    require_idempotency_key, save_idempotency_record,
     save_idempotency_record_sync, to_sales_order_data_with_product_names, try_idempotent_replay,
 };
 use crate::{
@@ -29,7 +29,7 @@ pub async fn create_sales_order(
     AppJson(req): AppJson<SalesOrderCreateRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "SALES"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "SALES"], &request_id)?;
 
     let idempotency_key = require_idempotency_key(&headers, &request_id)?;
     let request_payload = serde_json::to_value(&req).map_err(|_| {
@@ -106,7 +106,6 @@ pub async fn create_sales_order(
                 items: items.clone(),
                 remark: req.remark.clone(),
                 created_by: auth.user_id,
-                version: 1,
                 confirmed_at: None,
                 returned_at: None,
                 voided_at: None,
@@ -206,7 +205,6 @@ pub async fn create_sales_order(
             items,
             remark: req.remark,
             created_by: auth.user_id,
-            version: 1,
             confirmed_at: None,
             returned_at: None,
             voided_at: None,
@@ -286,7 +284,7 @@ pub async fn confirm_sales_order(
     AppJson(req): AppJson<OrderActionRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "SALES"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "SALES"], &request_id)?;
 
     let idempotency_key = require_idempotency_key(&headers, &request_id)?;
     let request_payload = serde_json::to_value(&req).map_err(|_| {
@@ -367,19 +365,7 @@ pub async fn confirm_sales_order(
         order.clone()
     };
 
-    if let Some(expected_version) = req.expected_version
-        && expected_version != existing.version
-    {
-        return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-            .with_data(json!({
-                "resource": "sales_order",
-                "resource_id": existing.id,
-                "expected_version": expected_version,
-                "current_version": existing.version,
-                "latest_snapshot": sales_order_snapshot(&existing)
-            }))
-            .with_request_id(request_id));
-    }
+    
     if existing.status != SalesOrderStatus::Draft {
         return Err(AppError::conflict(4090, "仅 DRAFT 状态可确认销售单")
             .with_data(json!({ "status": existing.status.as_str() }))
@@ -420,7 +406,6 @@ pub async fn confirm_sales_order(
                 AppError::not_found("商品不存在").with_request_id(request_id.clone())
             })?;
             product.current_stock -= item.qty;
-            product.version += 1;
 
             stock_logs.push(StockLog::now(
                 next_log_id,
@@ -446,21 +431,11 @@ pub async fn confirm_sales_order(
             AppError::not_found("销售单不存在").with_request_id(request_id.clone())
         })?;
 
-        if order.version != existing.version {
-            return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-                .with_data(json!({
-                    "resource": "sales_order",
-                    "resource_id": order.id,
-                    "expected_version": existing.version,
-                    "current_version": order.version,
-                    "latest_snapshot": sales_order_snapshot(order)
-                }))
-                .with_request_id(request_id));
-        }
+
 
         let now = Utc::now().to_rfc3339();
         order.status = SalesOrderStatus::Confirmed;
-        order.version += 1;
+
         order.confirmed_at = Some(now.clone());
         order.updated_at = now;
         order.clone()
@@ -504,7 +479,7 @@ pub async fn void_sales_order(
     AppJson(req): AppJson<OrderActionRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "SALES"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "SALES"], &request_id)?;
 
     let idempotency_key = require_idempotency_key(&headers, &request_id)?;
     let request_payload = serde_json::to_value(&req).map_err(|_| {
@@ -584,19 +559,7 @@ pub async fn void_sales_order(
         order.clone()
     };
 
-    if let Some(expected_version) = req.expected_version
-        && expected_version != existing.version
-    {
-        return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-            .with_data(json!({
-                "resource": "sales_order",
-                "resource_id": existing.id,
-                "expected_version": expected_version,
-                "current_version": existing.version,
-                "latest_snapshot": sales_order_snapshot(&existing)
-            }))
-            .with_request_id(request_id));
-    }
+    
 
     if existing.status != SalesOrderStatus::Draft {
         return Err(AppError::conflict(4090, "仅 DRAFT 状态可作废销售单")
@@ -612,21 +575,11 @@ pub async fn void_sales_order(
             AppError::not_found("销售单不存在").with_request_id(request_id.clone())
         })?;
 
-        if order.version != existing.version {
-            return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-                .with_data(json!({
-                    "resource": "sales_order",
-                    "resource_id": order.id,
-                    "expected_version": existing.version,
-                    "current_version": order.version,
-                    "latest_snapshot": sales_order_snapshot(order)
-                }))
-                .with_request_id(request_id));
-        }
+
 
         let now = Utc::now().to_rfc3339();
         order.status = SalesOrderStatus::Voided;
-        order.version += 1;
+
         order.voided_at = Some(now.clone());
         order.updated_at = now;
         order.clone()
@@ -670,7 +623,7 @@ pub async fn return_sales_order(
     AppJson(req): AppJson<SalesOrderReturnRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "SALES"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "SALES"], &request_id)?;
 
     let idempotency_key = require_idempotency_key(&headers, &request_id)?;
     let request_payload = serde_json::to_value(&req).map_err(|_| {
@@ -760,19 +713,7 @@ pub async fn return_sales_order(
         order.clone()
     };
 
-    if let Some(expected_version) = req.expected_version
-        && expected_version != existing.version
-    {
-        return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-            .with_data(json!({
-                "resource": "sales_order",
-                "resource_id": existing.id,
-                "expected_version": expected_version,
-                "current_version": existing.version,
-                "latest_snapshot": sales_order_snapshot(&existing)
-            }))
-            .with_request_id(request_id));
-    }
+    
 
     match existing.status {
         SalesOrderStatus::Confirmed | SalesOrderStatus::ReturnedPartial => {}
@@ -830,7 +771,6 @@ pub async fn return_sales_order(
                 return Err(AppError::not_found("商品不存在").with_request_id(request_id));
             }
             product.current_stock += *qty;
-            product.version += 1;
 
             stock_logs.push(StockLog::now(
                 next_log_id,
@@ -856,17 +796,7 @@ pub async fn return_sales_order(
             AppError::not_found("销售单不存在").with_request_id(request_id.clone())
         })?;
 
-        if order.version != existing.version {
-            return Err(AppError::conflict(4091, "版本冲突，请刷新后重试")
-                .with_data(json!({
-                    "resource": "sales_order",
-                    "resource_id": order.id,
-                    "expected_version": existing.version,
-                    "current_version": order.version,
-                    "latest_snapshot": sales_order_snapshot(order)
-                }))
-                .with_request_id(request_id));
-        }
+
 
         for (product_id, qty, _) in &pending_returns {
             if let Some(item) = order.items.iter_mut().find(|i| i.product_id == *product_id) {
@@ -880,7 +810,7 @@ pub async fn return_sales_order(
         } else {
             SalesOrderStatus::ReturnedPartial
         };
-        order.version += 1;
+
         if let Some(remark) = req.remark.clone() {
             order.remark = Some(remark);
         }

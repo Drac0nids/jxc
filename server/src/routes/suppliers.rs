@@ -81,7 +81,7 @@ pub async fn create_supplier(
     Json(req): Json<CreateSupplierRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     if req.name.trim().is_empty() {
         return Err(AppError::bad_request("供应商名称不能为空"));
@@ -106,7 +106,7 @@ pub async fn update_supplier(
     Json(req): Json<UpdateSupplierRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     let pool = postgres_pool_or_none(&state);
     let supplier = state
@@ -126,7 +126,7 @@ pub async fn delete_supplier(
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN"], &request_id)?;
 
     let pool = postgres_pool_or_none(&state);
     state

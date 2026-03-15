@@ -80,7 +80,6 @@ pub struct ScanProductData {
     pub current_stock: i32,
     pub retail_price: String,
     pub cost_price: Option<String>,
-    pub version: i32,
     pub min_stock_limit: i32,
 }
 
@@ -106,7 +105,6 @@ pub struct ProductData {
     pub last_inbound_unit_cost: Option<String>,
     pub cost_price: Option<String>,
     pub min_stock_limit: i32,
-    pub version: i32,
     pub category_id: Option<i64>,
     pub track_batches: bool,
 }
@@ -197,7 +195,6 @@ pub struct InventoryResultData {
     pub product_id: i64,
     pub current_stock: i32,
     pub cost_price: String,
-    pub version: i32,
     pub track_batches: bool,
 }
 
@@ -206,7 +203,6 @@ pub struct InventoryBatchItemResultData {
     pub product_id: i64,
     pub current_stock: i32,
     pub cost_price: String,
-    pub version: i32,
     pub track_batches: bool,
 }
 
@@ -238,7 +234,6 @@ pub struct OutboundItemResult {
     pub product_id: i64,
     pub qty: i32,
     pub current_stock: i32,
-    pub version: i32,
 }
 
 // --- Orders Common ---
@@ -283,7 +278,6 @@ pub struct PurchaseOrderData {
     pub items: Vec<PurchaseOrderItemData>,
     pub total_amount: String,
     pub remark: Option<String>,
-    pub version: i32,
     pub confirmed_at: Option<String>,
     pub voided_at: Option<String>,
     pub created_at: String,
@@ -339,7 +333,6 @@ pub struct SalesOrderData {
     pub items: Vec<SalesOrderItemData>,
     pub total_amount: String,
     pub remark: Option<String>,
-    pub version: i32,
     pub confirmed_at: Option<String>,
     pub returned_at: Option<String>,
     pub voided_at: Option<String>,
@@ -390,7 +383,6 @@ pub struct StockCheckData {
     pub status: String,
     pub items: Vec<StockCheckItemData>,
     pub remark: Option<String>,
-    pub version: i32,
     pub counting_at: Option<String>,
     pub confirmed_at: Option<String>,
     pub created_at: String,
@@ -576,7 +568,6 @@ pub fn to_purchase_order_data(
         items,
         total_amount: total_amount.round_dp(4).to_string(),
         remark: order.remark.clone(),
-        version: order.version,
         confirmed_at: order.confirmed_at.clone(),
         voided_at: order.voided_at.clone(),
         created_at: order.created_at.clone(),
@@ -584,12 +575,12 @@ pub fn to_purchase_order_data(
     }
 }
 
+#[allow(dead_code)]
 pub fn purchase_order_snapshot(order: &PurchaseOrder) -> Value {
     json!({
         "id": order.id,
         "biz_no": order.biz_no,
         "status": order.status.as_str(),
-        "version": order.version,
         "updated_at": order.updated_at
     })
 }
@@ -638,7 +629,6 @@ pub fn to_sales_order_data(
         items,
         total_amount: total_amount.round_dp(4).to_string(),
         remark: order.remark.clone(),
-        version: order.version,
         confirmed_at: order.confirmed_at.clone(),
         returned_at: order.returned_at.clone(),
         voided_at: order.voided_at.clone(),
@@ -657,12 +647,12 @@ pub async fn to_sales_order_data_with_product_names(
     Ok(to_sales_order_data(order, &product_name_map))
 }
 
+#[allow(dead_code)]
 pub fn sales_order_snapshot(order: &SalesOrder) -> Value {
     json!({
         "id": order.id,
         "biz_no": order.biz_no,
         "status": order.status.as_str(),
-        "version": order.version,
         "updated_at": order.updated_at
     })
 }
@@ -690,7 +680,6 @@ pub fn to_stock_check_data(
             })
             .collect(),
         remark: check.remark.clone(),
-        version: check.version,
         counting_at: check.counting_at.clone(),
         confirmed_at: check.confirmed_at.clone(),
         created_at: check.created_at.clone(),
@@ -708,12 +697,12 @@ pub async fn to_stock_check_data_with_names(
     Ok(to_stock_check_data(check, &product_name_map))
 }
 
+#[allow(dead_code)]
 pub fn stock_check_snapshot(check: &StockCheck) -> Value {
     json!({
         "id": check.id,
         "biz_no": check.biz_no,
         "status": check.status.as_str(),
-        "version": check.version,
         "updated_at": check.updated_at
     })
 }
@@ -730,6 +719,7 @@ pub fn to_user_data(user: &User) -> UserData {
 pub fn parse_user_role_input(raw: &str, request_id: &str) -> Result<UserRole, AppError> {
     match raw.trim().to_uppercase().as_str() {
         "OWNER" => Ok(UserRole::Owner),
+        "ADMIN" => Ok(UserRole::Admin),
         "PURCHASER" => Ok(UserRole::Purchaser),
         "SALES" => Ok(UserRole::Sales),
         _ => Err(AppError::bad_request(format!("无效的角色类型: {raw}"))
@@ -785,18 +775,17 @@ pub fn to_product_data(product: &Product, hide_cost_price: bool) -> ProductData 
             Some(product.cost_price.round_dp(4).to_string())
         },
         min_stock_limit: product.min_stock_limit,
-        version: product.version,
         category_id: product.category_id,
         track_batches: product.track_batches,
     }
 }
 
+#[allow(dead_code)]
 pub fn product_snapshot(product: &Product) -> Value {
     json!({
         "id": product.id,
         "current_stock": product.current_stock,
         "cost_price": product.cost_price.round_dp(4).to_string(),
-        "version": product.version
     })
 }
 

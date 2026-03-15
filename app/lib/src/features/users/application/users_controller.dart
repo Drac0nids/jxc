@@ -120,6 +120,30 @@ class UsersController extends ChangeNotifier {
     }
   }
 
+  // ── Delete User ───────────────────────────────────────────────────────────
+
+  Future<bool> deleteUser(String userId, String userName) async {
+    if (_submitting) return false;
+    _submitting = true;
+    _errorMessage = null;
+    _successMessage = null;
+    notifyListeners();
+
+    try {
+      await _repository.deleteUser(userId);
+      _successMessage = '员工「$userName」已删除';
+      await load();
+      return true;
+    } catch (e) {
+      _errorMessage = _humanize(e);
+      notifyListeners();
+      return false;
+    } finally {
+      _submitting = false;
+      notifyListeners();
+    }
+  }
+
   // ── Error humanizer ───────────────────────────────────────────────────────
 
   String _humanize(Object error) {

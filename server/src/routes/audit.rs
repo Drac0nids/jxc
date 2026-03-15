@@ -27,7 +27,7 @@ pub async fn list_audit_logs(
     Query(query): Query<AuditLogQuery>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN"], &request_id)?;
 
     let timezone = FixedOffset::east_opt(8 * 3600)
         .ok_or_else(|| AppError::internal("时区配置异常").with_request_id(request_id.clone()))?;
@@ -203,7 +203,7 @@ pub async fn list_stock_logs(
     Query(query): Query<StockLogQuery>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     let timezone = FixedOffset::east_opt(8 * 3600)
         .ok_or_else(|| AppError::internal("时区配置异常").with_request_id(request_id.clone()))?;

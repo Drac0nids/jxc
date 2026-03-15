@@ -133,7 +133,7 @@ pub async fn create_category(
     Json(req): Json<CreateCategoryRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN"], &request_id)?;
 
     // 验证名称不为空
     let name = req.name.trim().to_string();
@@ -207,7 +207,7 @@ pub async fn update_category(
     Json(req): Json<UpdateCategoryRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN"], &request_id)?;
 
     if !state.repository.is_postgres() {
         return Err(AppError::bad_request(
@@ -261,7 +261,7 @@ pub async fn delete_category(
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN"], &request_id)?;
 
     if !state.repository.is_postgres() {
         return Err(AppError::bad_request(

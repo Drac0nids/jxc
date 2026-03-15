@@ -121,7 +121,7 @@ pub async fn create_batch(
     Json(req): Json<CreateBatchRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     let pool = postgres_pool_or_none(&state);
     let today = chrono::Utc::now().date_naive();
@@ -209,7 +209,7 @@ pub async fn update_batch(
     Json(req): Json<UpdateBatchRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     let pool = postgres_pool_or_none(&state);
     let batch = state.repository.update_product_batch(
@@ -235,7 +235,7 @@ pub async fn mark_sold_out(
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "PURCHASER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
     let pool = postgres_pool_or_none(&state);
     let batch = state.repository.mark_batch_sold_out(pool, auth.tenant_id, id).await?;
@@ -252,7 +252,7 @@ pub async fn delete_batch(
     Path(id): Path<i64>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER"], &request_id)?;
+    ensure_role(&auth.role, &["OWNER", "ADMIN"], &request_id)?;
 
     let pool = postgres_pool_or_none(&state);
     state.repository.delete_product_batch(pool, auth.tenant_id, id).await?;

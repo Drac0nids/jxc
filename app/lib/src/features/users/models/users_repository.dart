@@ -69,4 +69,14 @@ class UsersRepository {
           raw is Map<String, dynamic> ? raw : <String, dynamic>{},
     );
   }
+
+  // ── Delete user ───────────────────────────────────────────────────────────
+
+  Future<void> deleteUser(String userId) async {
+    await _client.delete<Map<String, dynamic>>(
+      '/users/$userId',
+      decoder: (Object? raw) =>
+          raw is Map<String, dynamic> ? raw : <String, dynamic>{},
+    );
+  }
 }
