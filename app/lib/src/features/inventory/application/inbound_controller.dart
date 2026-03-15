@@ -29,12 +29,16 @@ class InboundScanPreview {
     required this.productName,
     required this.barcodeText,
     required this.unitCostText,
+    required this.currentStock,
+    required this.retailPrice,
   });
 
   final String productIdText;
   final String productName;
   final String barcodeText;
   final String unitCostText;
+  final int currentStock;
+  final String retailPrice;
 }
 
 class InboundBatchFormItemInput {
@@ -243,6 +247,8 @@ class InboundController extends ChangeNotifier {
         productName: scanned.name,
         barcodeText: barcodeValue,
         unitCostText: defaultUnitCost,
+        currentStock: scanned.currentStock,
+        retailPrice: scanned.retailPrice,
       );
     } catch (error) {
       if (error is ApiException && error.code == 4040) {

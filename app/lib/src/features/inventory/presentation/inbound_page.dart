@@ -107,6 +107,8 @@ class _InboundPageState extends State<InboundPage> {
   String _scanConfirmProductName = '';
   String _scanConfirmBarcode = '';
   String _scanConfirmUnitCost = '';
+  int _scanConfirmCurrentStock = 0;
+  String _scanConfirmRetailPrice = '';
   bool _scanConfirmSessionActive = false;
   int _scanConfirmProcessedCount = 0;
   bool _continuousSessionActive = false;
@@ -307,11 +309,12 @@ class _InboundPageState extends State<InboundPage> {
                 onClear: _resetScan,
               ),
               const SizedBox(height: 12),
+              // ── 手动补录区 ──────────────────────────────────────
               SectionCard(
-                title: '高级录入区（手工）',
+                title: '手动补录',
                 subtitle: _manualFormExpanded
-                    ? '可将当前表单加入“待提交明细”，用于异常补录'
-                    : '默认折叠。需要手工补录时可展开。',
+                    ? '手动输入商品条码和数量，加入待提交明细'
+                    : '扫码异常时可展开手动输入',
                 action: TextButton(
                   onPressed: widget.controller.submitting
                       ? null
@@ -327,15 +330,9 @@ class _InboundPageState extends State<InboundPage> {
                   children: <Widget>[
                     if (_manualFormExpanded) ...<Widget>[
                       _buildTextField(
-                        controller: _productIdController,
-                        label: '商品ID',
-                        hint: '可选，正整数',
-                      ),
-                      const SizedBox(height: 8),
-                      _buildTextField(
                         controller: _barcodeController,
-                        label: '条码',
-                        hint: '可选，product_id 与 barcode 二选一即可（支持扫码枪与手机摄像头）',
+                        label: '条码 *',
+                        hint: '输入或扫描商品条码',
                         suffixIcon: IconButton(
                           tooltip: '扫码填充条码',
                           onPressed: widget.controller.scanning ||
@@ -361,7 +358,7 @@ class _InboundPageState extends State<InboundPage> {
                           Expanded(
                             child: _buildTextField(
                               controller: _unitCostController,
-                              label: '进货价格',
+                              label: '进货单价',
                               hint: '例如：2.20',
                               keyboardType:
                                   const TextInputType.numberWithOptions(
@@ -372,23 +369,16 @@ class _InboundPageState extends State<InboundPage> {
                       ),
                       const SizedBox(height: 8),
                       _buildTextField(
-                        controller: _expectedVersionController,
-                        label: '版本',
-                        hint: '可选 expected_version',
-                        keyboardType: TextInputType.number,
-                      ),
-                      const SizedBox(height: 8),
-                      _buildTextField(
                         controller: _remarkController,
                         label: '备注',
-                        hint: '可选备注',
+                        hint: '可选',
                       ),
                       const SizedBox(height: 12),
                       Wrap(
                         spacing: 8,
                         runSpacing: 8,
                         children: <Widget>[
-                          OutlinedButton(
+                          FilledButton.tonal(
                             onPressed: widget.controller.submitting ||
                                     !widget.controller.canSubmit
                                 ? null
@@ -404,11 +394,6 @@ class _InboundPageState extends State<InboundPage> {
                         ],
                       ),
                     ],
-                    const SizedBox(height: 8),
-                    Text(
-                      '提交规则：1 条明细走单条接口；2 条及以上走批量接口。当前待提交 ${effectiveDraftItems.length} 条。',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
                     if (widget.controller.errorMessage != null) ...<Widget>[
                       const SizedBox(height: 12),
                       StatusNotice(
@@ -550,6 +535,8 @@ class _InboundPageState extends State<InboundPage> {
       _scanConfirmProductName = preview.productName;
       _scanConfirmBarcode = preview.barcodeText;
       _scanConfirmUnitCost = preview.unitCostText;
+      _scanConfirmCurrentStock = preview.currentStock;
+      _scanConfirmRetailPrice = preview.retailPrice;
       _scanConfirmQtyController.text = '1';
       _scanConfirmSessionActive = true;
     });
@@ -558,79 +545,164 @@ class _InboundPageState extends State<InboundPage> {
   }
 
   Future<void> _showScanConfirmDialog() async {
-    if (!mounted) {
-      return;
-    }
+    if (!mounted) return;
 
-    final bool? confirmed = await showDialog<bool>(
+    final unitCostEditController = TextEditingController(text: _scanConfirmUnitCost);
+    final cs = Theme.of(context).colorScheme;
+
+    final bool? confirmed = await showModalBottomSheet<bool>(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text('确认写入'),
-          content: Column(
+      isScrollControlled: true,
+      useSafeArea: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (BuildContext ctx) {
+        return Padding(
+          padding: EdgeInsets.fromLTRB(
+            20, 16, 20, MediaQuery.of(ctx).viewInsets.bottom + 20,
+          ),
+          child: Column(
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
-              Text('已命中商品：#$_scanConfirmProductId $_scanConfirmProductName'),
-              const SizedBox(height: 8),
-              TextField(
-                controller: _scanConfirmQtyController,
-                keyboardType: TextInputType.number,
-                autofocus: true,
-                textInputAction: TextInputAction.done,
-                onTap: () {
-                  _scanConfirmQtyController.selection = TextSelection(
-                    baseOffset: 0,
-                    extentOffset: _scanConfirmQtyController.text.length,
-                  );
-                },
-                onSubmitted: (_) {
-                  final ok = _applyScanConfirm();
-                  if (ok) {
-                    Navigator.of(context).pop(true);
-                  }
-                },
-                decoration: const InputDecoration(
-                  labelText: '数量 *',
-                  hintText: '1',
-                  border: OutlineInputBorder(),
-                  isDense: true,
+              // 标题
+              Row(
+                children: <Widget>[
+                  Icon(Icons.check_circle_outline_rounded, color: cs.primary, size: 22),
+                  const SizedBox(width: 8),
+                  const Text('确认入库', style: TextStyle(fontSize: 18, fontWeight: FontWeight.w700)),
+                ],
+              ),
+              const SizedBox(height: 16),
+              // 商品信息卡
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: cs.primaryContainer.withValues(alpha: 0.3),
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: cs.primary.withValues(alpha: 0.2)),
                 ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      _scanConfirmProductName,
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
+                    ),
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 16,
+                      runSpacing: 4,
+                      children: <Widget>[
+                        _infoChip(cs, '当前库存', '$_scanConfirmCurrentStock'),
+                        _infoChip(cs, '零售价', '¥$_scanConfirmRetailPrice'),
+                        if (_scanConfirmUnitCost.isNotEmpty)
+                          _infoChip(cs, '上次进货价', '¥$_scanConfirmUnitCost'),
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 16),
+              // 数量 + 进货价
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: TextField(
+                      controller: _scanConfirmQtyController,
+                      keyboardType: TextInputType.number,
+                      autofocus: true,
+                      textInputAction: TextInputAction.next,
+                      onTap: () {
+                        _scanConfirmQtyController.selection = TextSelection(
+                          baseOffset: 0,
+                          extentOffset: _scanConfirmQtyController.text.length,
+                        );
+                      },
+                      decoration: const InputDecoration(
+                        labelText: '入库数量 *',
+                        hintText: '1',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: TextField(
+                      controller: unitCostEditController,
+                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      textInputAction: TextInputAction.done,
+                      onSubmitted: (_) {
+                        _scanConfirmUnitCost = unitCostEditController.text.trim();
+                        final ok = _applyScanConfirm();
+                        if (ok) Navigator.of(ctx).pop(true);
+                      },
+                      decoration: const InputDecoration(
+                        labelText: '进货单价',
+                        hintText: '可选',
+                        border: OutlineInputBorder(),
+                        isDense: true,
+                        prefixText: '¥ ',
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 20),
+              // 操作按钮
+              Row(
+                children: <Widget>[
+                  Expanded(
+                    child: OutlinedButton(
+                      onPressed: () => Navigator.of(ctx).pop(false),
+                      child: const Text('取消'),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    flex: 2,
+                    child: FilledButton(
+                      onPressed: widget.controller.submitting
+                          ? null
+                          : () {
+                              _scanConfirmUnitCost = unitCostEditController.text.trim();
+                              final ok = _applyScanConfirm();
+                              if (ok) Navigator.of(ctx).pop(true);
+                            },
+                      child: const Text('确认入库'),
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: widget.controller.submitting
-                  ? null
-                  : () => Navigator.of(context).pop(false),
-              child: const Text('取消'),
-            ),
-            FilledButton(
-              onPressed: widget.controller.submitting
-                  ? null
-                  : () {
-                      final ok = _applyScanConfirm();
-                      if (ok) {
-                        Navigator.of(context).pop(true);
-                      }
-                    },
-              child: const Text('确认写入（回车）'),
-            ),
-          ],
         );
       },
     );
 
-    if (!mounted) {
-      return;
-    }
+    unitCostEditController.dispose();
+
+    if (!mounted) return;
 
     if (confirmed != true && _scanMode == InboundScanMode.scanConfirm) {
       _scanBarcodeController.clear();
       _scanBarcodeFocusNode.requestFocus();
       _showSnack('已取消本次确认，可继续扫码');
     }
+  }
+
+  Widget _infoChip(ColorScheme cs, String label, String value) {
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: <Widget>[
+        Text(label, style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant)),
+        const SizedBox(width: 4),
+        Text(value, style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+      ],
+    );
   }
 
   bool _applyScanConfirm() {
@@ -800,6 +872,8 @@ class _InboundPageState extends State<InboundPage> {
       _scanConfirmProductName = '';
       _scanConfirmBarcode = '';
       _scanConfirmUnitCost = '';
+      _scanConfirmCurrentStock = 0;
+      _scanConfirmRetailPrice = '';
       _scanConfirmSessionActive = false;
       _scanConfirmProcessedCount = 0;
       _continuousSessionActive = false;
@@ -809,19 +883,13 @@ class _InboundPageState extends State<InboundPage> {
   }
 
   void _addCurrentFormToDraft() {
-    final productId = _productIdController.text.trim();
     final barcode = _barcodeController.text.trim();
     final qty = _qtyController.text.trim();
     final unitCost = _unitCostController.text.trim();
-    final expectedVersion = _expectedVersionController.text.trim();
     final remark = _remarkController.text.trim();
 
-    if (productId.isEmpty && barcode.isEmpty) {
-      _showSnack('加入明细前请先填写商品ID或条码');
-      return;
-    }
-    if (productId.isNotEmpty && int.tryParse(productId) == null) {
-      _showSnack('商品ID必须为正整数');
+    if (barcode.isEmpty) {
+      _showSnack('请先填写商品条码');
       return;
     }
     final qtyValue = int.tryParse(qty);
@@ -833,23 +901,14 @@ class _InboundPageState extends State<InboundPage> {
       _showSnack('进货价格式错误（示例：2.20）');
       return;
     }
-    if (expectedVersion.isNotEmpty) {
-      final expectedVersionValue = int.tryParse(expectedVersion);
-      if (expectedVersionValue == null || expectedVersionValue < 0) {
-        _showSnack('版本必须为大于等于 0 的整数');
-        return;
-      }
-    }
 
     _upsertDraftItem(
-      productId: productId,
+      productId: '',
       barcode: barcode,
-      productName: remark.isNotEmpty
-          ? remark
-          : '商品#${productId.isNotEmpty ? productId : barcode}',
+      productName: remark.isNotEmpty ? remark : '商品#$barcode',
       qty: qty,
       unitCost: unitCost,
-      expectedVersion: expectedVersion,
+      expectedVersion: '',
       remark: remark,
     );
     _clearFormOnly();
@@ -899,6 +958,11 @@ class _InboundPageState extends State<InboundPage> {
     _draftItems.clear();
     _resetScan();
     setState(() {});
+
+    // —— 成功反馈弹窗 ——————————————————————————
+    if (mounted) {
+      await _showSuccessSheet();
+    }
 
     // —— 批次关联弹窗（入库成功后） ——————————————————————————
     final bc = widget.batchController;
@@ -967,6 +1031,92 @@ class _InboundPageState extends State<InboundPage> {
     widget.controller.clearMessages();
     widget.controller.clearResult();
     setState(() {});
+  }
+
+  Future<void> _showSuccessSheet() async {
+    final cs = Theme.of(context).colorScheme;
+    final singleResult = widget.controller.result;
+    final batchResult = widget.controller.batchResult;
+
+    // 构造摘要信息
+    String bizNo = '';
+    List<String> details = [];
+
+    if (singleResult != null) {
+      bizNo = singleResult.bizNo;
+      details.add('商品#${singleResult.productId}  当前库存：${singleResult.currentStock}');
+    }
+    if (batchResult != null) {
+      bizNo = batchResult.bizNo;
+      for (final item in batchResult.items) {
+        details.add('商品#${item.productId}  当前库存：${item.currentStock}');
+      }
+    }
+    if (bizNo.isEmpty) return;
+
+    await showModalBottomSheet<void>(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (ctx) {
+        // 3秒后自动关闭
+        Future.delayed(const Duration(seconds: 3), () {
+          // ignore: use_build_context_synchronously
+          if (Navigator.of(ctx).canPop()) {
+            // ignore: use_build_context_synchronously
+            Navigator.of(ctx).pop();
+          }
+        });
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(24, 20, 24, 32),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Container(
+                padding: const EdgeInsets.all(14),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF10B981).withValues(alpha: 0.12),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(
+                  Icons.check_rounded,
+                  color: Color(0xFF10B981),
+                  size: 36,
+                ),
+              ),
+              const SizedBox(height: 14),
+              const Text(
+                '入库成功',
+                style: TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                '单号：$bizNo',
+                style: TextStyle(fontSize: 13, color: cs.onSurfaceVariant),
+              ),
+              if (details.isNotEmpty) ...<Widget>[
+                const SizedBox(height: 12),
+                ...details.map(
+                  (d) => Padding(
+                    padding: const EdgeInsets.only(bottom: 4),
+                    child: Text(d, style: const TextStyle(fontSize: 13)),
+                  ),
+                ),
+              ],
+              const SizedBox(height: 16),
+              SizedBox(
+                width: double.infinity,
+                child: FilledButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('继续入库'),
+                ),
+              ),
+            ],
+          ),
+        );
+      },
+    );
   }
 
   void _clearFormOnly() {
@@ -1205,8 +1355,8 @@ class _ScanCard extends StatelessWidget {
                 onPressed: scanning || submitting || !canSubmit ? null : onScan,
                 child: Text(
                   scanMode == InboundScanMode.continuousScan
-                      ? (continuousSessionActive ? '会话扫码中...' : '开始连续扫码')
-                      : (scanning ? '识别中...' : '按条码处理'),
+                      ? (continuousSessionActive ? '扫码中...' : '开始连续扫码')
+                      : (scanning ? '识别中...' : '扫码入库'),
                 ),
               ),
               OutlinedButton(
@@ -1225,8 +1375,9 @@ class _ScanCard extends StatelessWidget {
           const SizedBox(height: 8),
           Text(
             scanMode == InboundScanMode.continuousScan
-                ? '连续扫码会话：${continuousSessionActive ? '进行中' : '未开始'}，已处理 $continuousProcessedCount 条。'
-                : '确认续扫会话：${scanConfirmSessionActive ? '进行中' : '未开始'}，已处理 $scanConfirmProcessedCount 条。',
+                ? '连续扫码：${continuousSessionActive ? '进行中' : '未开始'}，已处理 $continuousProcessedCount 条'
+                : '确认续扫：${scanConfirmSessionActive ? '进行中' : '未开始'}，已处理 $scanConfirmProcessedCount 条',
+            style: TextStyle(fontSize: 12, color: Theme.of(context).colorScheme.onSurfaceVariant),
           ),
           if (scanErrorMessage != null) ...<Widget>[
             const SizedBox(height: 8),
@@ -1267,90 +1418,134 @@ class _DraftItemsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return SectionCard(
-      title: '待提交入库明细（${items.length}）',
-      footer: Wrap(
-        spacing: 8,
-        runSpacing: 8,
+      title: '待提交明细（${items.length}）',
+      footer: Row(
         children: <Widget>[
-          FilledButton(
-            onPressed:
-                submitting || !canSubmit || items.isEmpty ? null : onSubmit,
-            child: Text(submitting ? '提交中...' : '提交入库'),
-          ),
-          Text(
-            items.isEmpty ? '请先加入明细，再提交入库。' : '请核对明细后提交入库。',
+          Expanded(
+            child: FilledButton.icon(
+              onPressed:
+                  submitting || !canSubmit || items.isEmpty ? null : onSubmit,
+              icon: submitting
+                  ? const SizedBox(
+                      width: 16, height: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    )
+                  : const Icon(Icons.upload_rounded, size: 18),
+              label: Text(submitting ? '提交中...' : '提交入库'),
+            ),
           ),
         ],
       ),
       child: Column(
         children: <Widget>[
           if (items.isEmpty)
-            const Align(
-              alignment: Alignment.centerLeft,
-              child: Text('暂无待提交明细，可扫码或填写表单后点击“加入明细”。'),
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Column(
+                children: <Widget>[
+                  Icon(Icons.inbox_outlined,
+                      size: 40, color: cs.onSurfaceVariant.withValues(alpha: 0.4)),
+                  const SizedBox(height: 8),
+                  Text(
+                    '暂无明细，扫码后自动加入',
+                    style: TextStyle(
+                      color: cs.onSurfaceVariant.withValues(alpha: 0.6),
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
             )
           else
             ...items.asMap().entries.map(
               (entry) {
                 final index = entry.key;
                 final item = entry.value;
-                return Card(
-                  margin: const EdgeInsets.only(bottom: 8),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: <Widget>[
-                        Text(
-                          '#${index + 1} 商品ID：${item.productId.isEmpty ? '-' : item.productId} / 条码：${item.barcode.isEmpty ? '-' : item.barcode}',
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                            '商品名称：${item.productName.isEmpty ? '-' : item.productName}'),
-                        const SizedBox(height: 4),
-                        Row(
-                          children: <Widget>[
-                            Expanded(
-                              child: Text('数量：${item.qty}'),
+                final unitCostDisplay = item.unitCost.isNotEmpty
+                    ? '¥${item.unitCost}'
+                    : '';
+                return Dismissible(
+                  key: ValueKey('draft-${item.localId}'),
+                  direction: DismissDirection.endToStart,
+                  background: Container(
+                    alignment: Alignment.centerRight,
+                    padding: const EdgeInsets.only(right: 20),
+                    margin: const EdgeInsets.only(bottom: 6),
+                    decoration: BoxDecoration(
+                      color: cs.errorContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(Icons.delete_outline_rounded, color: cs.error),
+                  ),
+                  confirmDismiss: (_) async => !submitting,
+                  onDismissed: (_) => onRemove(item.localId),
+                  child: Card(
+                    margin: const EdgeInsets.only(bottom: 6),
+                    elevation: 0,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: cs.outlineVariant.withValues(alpha: 0.5)),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+                      child: Row(
+                        children: <Widget>[
+                          Container(
+                            width: 24, height: 24,
+                            alignment: Alignment.center,
+                            decoration: BoxDecoration(
+                              color: cs.primaryContainer.withValues(alpha: 0.5),
+                              borderRadius: BorderRadius.circular(6),
                             ),
-                            const SizedBox(width: 8),
-                            SizedBox(
-                              width: 180,
-                              child: TextFormField(
-                                key: ValueKey(
-                                    'unit-cost-${item.localId}-${item.unitCost}'),
-                                initialValue: item.unitCost,
-                                enabled: !submitting,
-                                keyboardType:
-                                    const TextInputType.numberWithOptions(
-                                        decimal: true),
-                                decoration: const InputDecoration(
-                                  labelText: '进货价格',
-                                  hintText: '可选，例如：2.20',
-                                  border: OutlineInputBorder(),
-                                  isDense: true,
-                                ),
-                                onFieldSubmitted: (value) =>
-                                    onUpdateUnitCost(item.localId, value),
+                            child: Text(
+                              '${index + 1}',
+                              style: TextStyle(
+                                fontSize: 12, fontWeight: FontWeight.w700, color: cs.primary,
                               ),
                             ),
-                          ],
-                        ),
-                        const SizedBox(height: 4),
-                        Text(
-                            '版本：${item.expectedVersion.isEmpty ? '-' : item.expectedVersion}，备注：${item.remark.isEmpty ? '-' : item.remark}'),
-                        const SizedBox(height: 8),
-                        Align(
-                          alignment: Alignment.centerRight,
-                          child: OutlinedButton(
-                            onPressed: submitting
-                                ? null
-                                : () => onRemove(item.localId),
-                            child: const Text('删除'),
                           ),
-                        ),
-                      ],
+                          const SizedBox(width: 10),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: <Widget>[
+                                Text(
+                                  item.productName.isNotEmpty
+                                      ? item.productName
+                                      : '商品#${item.productId.isNotEmpty ? item.productId : item.barcode}',
+                                  style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
+                                  maxLines: 1, overflow: TextOverflow.ellipsis,
+                                ),
+                                if (item.barcode.isNotEmpty)
+                                  Text(
+                                    item.barcode,
+                                    style: TextStyle(fontSize: 11, color: cs.onSurfaceVariant),
+                                    maxLines: 1, overflow: TextOverflow.ellipsis,
+                                  ),
+                              ],
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Column(
+                            crossAxisAlignment: CrossAxisAlignment.end,
+                            children: <Widget>[
+                              Text(
+                                'x${item.qty}',
+                                style: TextStyle(
+                                  fontSize: 18, fontWeight: FontWeight.w800, color: cs.primary,
+                                ),
+                              ),
+                              if (unitCostDisplay.isNotEmpty)
+                                Text(
+                                  unitCostDisplay,
+                                  style: TextStyle(fontSize: 12, color: cs.onSurfaceVariant),
+                                ),
+                            ],
+                          ),
+                        ],
+                      ),
                     ),
                   ),
                 );
@@ -1361,6 +1556,7 @@ class _DraftItemsCard extends StatelessWidget {
     );
   }
 }
+
 
 class _ResultCard extends StatelessWidget {
   const _ResultCard({required this.result});
