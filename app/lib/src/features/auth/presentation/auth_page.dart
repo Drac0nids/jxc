@@ -23,7 +23,7 @@ class _AuthPageState extends State<AuthPage> {
   bool _isRegisterMode = false;
   bool _obscurePassword = true;
 
-  final TextEditingController _tenantCodeController = TextEditingController();
+  final TextEditingController _tenantCodeController = TextEditingController(text: 'DEMO01');
   final TextEditingController _tenantNameController = TextEditingController();
   final TextEditingController _usernameController =
       TextEditingController(text: 'admin');
