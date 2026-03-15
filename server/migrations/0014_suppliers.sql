@@ -14,7 +14,16 @@ CREATE TABLE IF NOT EXISTS suppliers (
 
 CREATE INDEX IF NOT EXISTS suppliers_tenant_idx ON suppliers (tenant_id, is_deleted);
 
--- 联通采购单的 supplier_id 外键（之前是裸 BIGINT NULL，现正式关联）
-ALTER TABLE purchase_orders
-    ADD CONSTRAINT IF NOT EXISTS fk_purchase_orders_supplier
-    FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL;
+-- 联通采购单的 supplier_id 外键
+-- 用 DO $$ 避免重复执行时报错（PostgreSQL 不支持 ADD CONSTRAINT IF NOT EXISTS）
+DO $$
+BEGIN
+    IF NOT EXISTS (
+        SELECT 1 FROM pg_constraint
+        WHERE conname = 'fk_purchase_orders_supplier'
+    ) THEN
+        ALTER TABLE purchase_orders
+            ADD CONSTRAINT fk_purchase_orders_supplier
+            FOREIGN KEY (supplier_id) REFERENCES suppliers(id) ON DELETE SET NULL;
+    END IF;
+END $$;
