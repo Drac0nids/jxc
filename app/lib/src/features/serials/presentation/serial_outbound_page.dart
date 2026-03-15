@@ -24,6 +24,10 @@ class _SerialOutboundPageState extends State<SerialOutboundPage> {
   bool _lastIsError = false;
   bool _isLookingUp = false;
 
+  static const int _deduplicateWindowMs = 1500;
+  String _lastScanCode = '';
+  int _lastScanAtMs = 0;
+
   // ── 出售价 ────────────────────────────────────────────────────────────────
   final _priceCtrl = TextEditingController();
   bool _showPriceField = false;
@@ -58,9 +62,17 @@ class _SerialOutboundPageState extends State<SerialOutboundPage> {
   }
 
   void _onDetect(BarcodeCapture cap) {
-    final code = cap.barcodes.firstOrNull?.rawValue ?? '';
+    final code = (cap.barcodes.firstOrNull?.rawValue ?? '').trim();
     if (code.isEmpty || _isLookingUp) return;
-    _lookupAndAdd(code.trim());
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (code == _lastScanCode && now - _lastScanAtMs <= _deduplicateWindowMs) {
+      return;
+    }
+    _lastScanCode = code;
+    _lastScanAtMs = now;
+
+    _lookupAndAdd(code);
   }
 
   Future<void> _lookupAndAdd(String sn) async {

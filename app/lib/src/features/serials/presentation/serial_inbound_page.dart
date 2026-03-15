@@ -38,6 +38,11 @@ class _SerialInboundPageState extends State<SerialInboundPage> {
   MobileScannerController? _scanCtrl;
   String? _lastErrorMsg;
 
+  // 防抖：与连续扫码保持相同的 1500ms 时间窗口
+  static const int _deduplicateWindowMs = 1500;
+  String _lastScanCode = '';
+  int _lastScanAtMs = 0;
+
   // ── 提交状态 ──────────────────────────────────────────────────────────────
   bool _submitting = false;
   String? _submitResult;
@@ -91,8 +96,17 @@ class _SerialInboundPageState extends State<SerialInboundPage> {
   }
 
   void _onDetect(BarcodeCapture capture) {
-    final code = capture.barcodes.firstOrNull?.rawValue ?? '';
+    final code = (capture.barcodes.firstOrNull?.rawValue ?? '').trim();
     if (code.isEmpty) return;
+
+    // 防抖：同一码在 _deduplicateWindowMs 内只处理一次
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (code == _lastScanCode && now - _lastScanAtMs <= _deduplicateWindowMs) {
+      return;
+    }
+    _lastScanCode = code;
+    _lastScanAtMs = now;
+
     _addSn(code);
   }
 
