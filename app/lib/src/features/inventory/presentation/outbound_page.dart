@@ -189,7 +189,9 @@ class _OutboundPageState extends State<OutboundPage> {
               _buildFormCard(context),
               if (widget.controller.result != null) ...<Widget>[
                 const SizedBox(height: 12),
-                _ResultCard(result: widget.controller.result!),
+                _ResultCard(
+                  result: widget.controller.result!,
+                  productNames: _productNameSnapshot),
               ],
             ],
           ),
@@ -818,9 +820,22 @@ class _OutboundPageState extends State<OutboundPage> {
     widget.controller.clearScanMessages();
   }
 
+  // productId -> name，提交前快照，结果页展示用
+  Map<int, String> _productNameSnapshot = {};
+
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
     _compactBlankRows();
+
+    // 提交前快照商品名称
+    final snapshot = <int, String>{};
+    for (final item in _itemEditors) {
+      final id = int.tryParse(item.productIdController.text.trim());
+      final name = item.productNameController.text.trim();
+      if (id != null && name.isNotEmpty) {
+        snapshot[id] = name;
+      }
+    }
 
     final ok = await widget.controller.submit(
       customerId: _customerIdController.text,
@@ -832,6 +847,7 @@ class _OutboundPageState extends State<OutboundPage> {
       return;
     }
 
+    setState(() => _productNameSnapshot = snapshot);
     _customerIdController.clear();
     _expectedVersionController.clear();
     _remarkController.clear();
@@ -1019,14 +1035,16 @@ class _OutboundItemEditors {
 }
 
 class _ResultCard extends StatelessWidget {
-  const _ResultCard({required this.result});
+  const _ResultCard({required this.result, required this.productNames});
 
   final OutboundResultData result;
+  final Map<int, String> productNames;
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
     return SectionCard(
-      title: '最近一次出库结果',
+      title: '出库结果',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -1046,11 +1064,11 @@ class _ResultCard extends StatelessWidget {
               const Text('总金额',
                   style: TextStyle(color: Colors.grey, fontSize: 13)),
               Text(
-                result.totalAmount,
-                style: const TextStyle(
-                    fontSize: 18,
+                '¥ ${result.totalAmount}',
+                style: TextStyle(
+                    fontSize: 20,
                     fontWeight: FontWeight.w900,
-                    fontFamily: 'RobotoMono',
+                    color: cs.primary,
                     letterSpacing: -0.5),
               ),
             ],
@@ -1060,13 +1078,36 @@ class _ResultCard extends StatelessWidget {
             child: Divider(height: 1),
           ),
           ...result.items.map(
-            (item) => Padding(
-              padding: const EdgeInsets.only(bottom: 4),
-              child: Text(
-                '商品ID=${item.productId}，出库数量=${item.qty}，剩余库存=${item.currentStock}，版本=${item.version}',
-                style: const TextStyle(fontSize: 12),
-              ),
-            ),
+            (item) {
+              final name = productNames[item.productId];
+              final label = (name != null && name.isNotEmpty)
+                  ? name
+                  : '商品#${item.productId}';
+              return Padding(
+                padding: const EdgeInsets.only(bottom: 6),
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: <Widget>[
+                          Text(label,
+                              style: const TextStyle(
+                                  fontWeight: FontWeight.w600, fontSize: 13)),
+                          Text(
+                            '出库 ${item.qty} 件  剩余库存 ${item.currentStock}',
+                            style: TextStyle(
+                                fontSize: 11, color: cs.onSurfaceVariant),
+                          ),
+                        ],
+                      ),
+                    ),
+                    Icon(Icons.check_circle_outline,
+                        size: 16, color: Colors.green.shade600),
+                  ],
+                ),
+              );
+            },
           ),
         ],
       ),
