@@ -171,7 +171,7 @@ class _SerialOutboundPageState extends State<SerialOutboundPage> {
     return Scaffold(
       backgroundColor: cs.surface,
       appBar: AppBar(
-        title: const Text('逐码出库'),
+        title: const Text('流水码出库'),
         leading: BackButton(onPressed: () {
           if (_scanning) _stopScanning();
           Navigator.pop(context);

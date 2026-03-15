@@ -197,7 +197,7 @@ class _SerialInboundPageState extends State<SerialInboundPage> {
     return Scaffold(
       backgroundColor: cs.surface,
       appBar: AppBar(
-        title: const Text('逐码入库'),
+        title: const Text('流水码入库'),
         actions: [
           IconButton(
             tooltip: 'SN 历史记录',
