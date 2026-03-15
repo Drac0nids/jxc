@@ -17,6 +17,7 @@ import '../../products/application/batch_controller.dart';
 import '../../products/application/category_controller.dart';
 import '../../products/application/low_stock_controller.dart';
 import '../../products/application/product_controller.dart';
+import '../../products/application/supplier_controller.dart';
 import '../../products/models/batch_models.dart';
 import '../../products/presentation/batch_management_page.dart';
 import '../../products/presentation/low_stock_page.dart';
@@ -85,6 +86,7 @@ class DashboardPage extends StatefulWidget {
     required this.productController,
     required this.categoryController,
     required this.batchController,
+    required this.supplierController,
     required this.usersController,
   });
 
@@ -103,6 +105,7 @@ class DashboardPage extends StatefulWidget {
   final ProductController productController;
   final CategoryController categoryController;
   final BatchController batchController;
+  final SupplierController supplierController;
   final UsersController usersController;
 
   @override
@@ -361,6 +364,7 @@ class _DashboardPageState extends State<DashboardPage>
             controller: widget.productController,
             categoryController: widget.categoryController,
             batchController: widget.batchController,
+            supplierController: widget.supplierController,
             onStockCheck: (int productId) {
               Navigator.of(context).push(MaterialPageRoute<void>(
                 builder: (_) => StockCheckPage(

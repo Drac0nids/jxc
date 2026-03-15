@@ -5,6 +5,7 @@ import '../features/inventory/models/inventory_repository.dart';
 import '../features/products/models/batch_models.dart';
 import '../features/products/models/category_repository.dart';
 import '../features/products/models/product_repository.dart';
+import '../features/products/models/supplier_repository.dart';
 import '../features/users/models/users_repository.dart';
 import '../network/api_client.dart';
 import '../storage/session_storage.dart';
@@ -19,6 +20,7 @@ class AppServices {
     required this.productRepository,
     required this.categoryRepository,
     required this.batchRepository,
+    required this.supplierRepository,
     required this.usersRepository,
   });
 
@@ -30,6 +32,7 @@ class AppServices {
   final ProductRepository productRepository;
   final CategoryRepository categoryRepository;
   final BatchRepository batchRepository;
+  final SupplierRepository supplierRepository;
   final UsersRepository usersRepository;
 
   factory AppServices.bootstrap() {
@@ -48,6 +51,7 @@ class AppServices {
       productRepository: ProductRepository(client: apiClient),
       categoryRepository: CategoryRepository(client: apiClient),
       batchRepository: BatchRepository(client: apiClient),
+      supplierRepository: SupplierRepository(client: apiClient),
       usersRepository: UsersRepository(client: apiClient),
     );
   }

@@ -71,6 +71,17 @@ pub struct Category {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Supplier {
+    pub id: i64,
+    pub tenant_id: Uuid,
+    pub name: String,
+    pub phone: Option<String>,
+    pub notes: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ProductBatch {
     pub id: i64,
     pub tenant_id: Uuid,

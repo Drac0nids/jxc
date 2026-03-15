@@ -7,12 +7,14 @@ import '../../../core/widgets/brand_ui.dart';
 import '../application/batch_controller.dart';
 import '../application/category_controller.dart';
 import '../application/product_controller.dart';
+import '../application/supplier_controller.dart';
 import '../models/category_models.dart';
 import '../models/product_models.dart';
 import 'batch_management_page.dart';
 import 'category_management_page.dart';
 import 'create_product_sheet.dart';
 import 'products_edit_page.dart';
+import 'supplier_management_page.dart';
 
 // 顶层常量，避免重复创建 RegExp
 const _kMoneyPattern = r'^\d+(\.\d{1,4})?$';
@@ -29,6 +31,7 @@ class ProductsPage extends StatefulWidget {
     this.onStockCheck,
     this.categoryController,
     this.batchController,
+    this.supplierController,
   });
 
   final ProductController controller;
@@ -41,6 +44,9 @@ class ProductsPage extends StatefulWidget {
 
   /// 可选，传入则商品卡片显示「批次管理」入口
   final BatchController? batchController;
+
+  /// 可选，传入则 AppBar 显示供应商管理入口
+  final SupplierController? supplierController;
 
   @override
   State<ProductsPage> createState() => _ProductsPageState();
@@ -253,6 +259,17 @@ class _ProductsPageState extends State<ProductsPage> {
                     ),
                   ),
                   child: const Text('分类'),
+                ),
+              if (widget.supplierController != null)
+                TextButton(
+                  onPressed: () => Navigator.of(context).push(
+                    MaterialPageRoute<void>(
+                      builder: (_) => SupplierManagementPage(
+                        controller: widget.supplierController!,
+                      ),
+                    ),
+                  ),
+                  child: const Text('供应商'),
                 ),
               const SizedBox(width: 4),
             ],

@@ -13,7 +13,7 @@ use crate::{
     models::{
         AuditLog, BarcodeLookupCache, BarcodeLookupStatus, Category, Product, ProductBatch,
         PurchaseOrder, PurchaseOrderItem, PurchaseOrderStatus, SalesOrder, SalesOrderItem,
-        SalesOrderStatus, StockCheck, StockCheckItem, StockCheckStatus, StockLog, User, UserRole,
+        SalesOrderStatus, StockCheck, StockCheckItem, StockCheckStatus, StockLog, Supplier, User, UserRole,
     },
 };
 
@@ -835,6 +835,61 @@ impl RepositoryProvider {
         match self {
             Self::Postgres(repo) => repo.delete_category(pool, tenant_id, category_id).await,
             Self::Memory(_) => Err(unsupported_operation("delete_category")),
+        }
+    }
+
+    // ── 供应商 ─────────────────────────────────────────────────────────────────
+
+    pub async fn list_suppliers(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        keyword: Option<String>,
+    ) -> Result<Vec<Supplier>, AppError> {
+        match self {
+            Self::Postgres(repo) => repo.list_suppliers(pool, tenant_id, keyword).await,
+            Self::Memory(_) => Ok(Vec::new()),
+        }
+    }
+
+    pub async fn create_supplier(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        name: String,
+        phone: Option<String>,
+        notes: Option<String>,
+    ) -> Result<Supplier, AppError> {
+        match self {
+            Self::Postgres(repo) => repo.create_supplier(pool, tenant_id, name, phone, notes).await,
+            Self::Memory(_) => Err(unsupported_operation("create_supplier")),
+        }
+    }
+
+    pub async fn update_supplier(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        id: i64,
+        name: Option<String>,
+        phone: Option<String>,
+        notes: Option<String>,
+    ) -> Result<Supplier, AppError> {
+        match self {
+            Self::Postgres(repo) => repo.update_supplier(pool, tenant_id, id, name, phone, notes).await,
+            Self::Memory(_) => Err(unsupported_operation("update_supplier")),
+        }
+    }
+
+    pub async fn delete_supplier(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        id: i64,
+    ) -> Result<(), AppError> {
+        match self {
+            Self::Postgres(repo) => repo.delete_supplier(pool, tenant_id, id).await,
+            Self::Memory(_) => Err(unsupported_operation("delete_supplier")),
         }
     }
 
@@ -5043,6 +5098,160 @@ fn map_product_row(row: sqlx::postgres::PgRow) -> Result<Product, AppError> {
             .try_get("track_batches")
             .map_err(|err| map_sqlx_error("读取批次追踪标记失败", err))?,
     })
+}
+
+// ── Supplier 方法 ─────────────────────────────────────────────────────────────
+impl PostgresRepository {
+    pub async fn list_suppliers(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        keyword: Option<String>,
+    ) -> Result<Vec<Supplier>, AppError> {
+        let pool = require_pool(pool)?;
+        let rows = if let Some(kw) = keyword.filter(|s| !s.trim().is_empty()) {
+            sqlx::query(
+                r#"
+                SELECT id, tenant_id, name, phone, notes, created_at, updated_at
+                FROM suppliers
+                WHERE tenant_id = $1 AND is_deleted = FALSE
+                  AND name ILIKE $2
+                ORDER BY name ASC
+                "#,
+            )
+            .bind(tenant_id)
+            .bind(format!("%{}%", kw.trim()))
+            .fetch_all(pool)
+            .await
+        } else {
+            sqlx::query(
+                r#"
+                SELECT id, tenant_id, name, phone, notes, created_at, updated_at
+                FROM suppliers
+                WHERE tenant_id = $1 AND is_deleted = FALSE
+                ORDER BY name ASC
+                "#,
+            )
+            .bind(tenant_id)
+            .fetch_all(pool)
+            .await
+        }
+        .map_err(|err| map_sqlx_error("查询供应商列表失败", err))?;
+
+        use sqlx::Row as _;
+        rows.iter().map(|row| {
+            Ok(Supplier {
+                id: row.try_get("id").map_err(|e| map_sqlx_error("id", e))?,
+                tenant_id: row.try_get("tenant_id").map_err(|e| map_sqlx_error("tenant_id", e))?,
+                name: row.try_get("name").map_err(|e| map_sqlx_error("name", e))?,
+                phone: row.try_get("phone").map_err(|e| map_sqlx_error("phone", e))?,
+                notes: row.try_get("notes").map_err(|e| map_sqlx_error("notes", e))?,
+                created_at: row.try_get("created_at").map_err(|e| map_sqlx_error("created_at", e))?,
+                updated_at: row.try_get("updated_at").map_err(|e| map_sqlx_error("updated_at", e))?,
+            })
+        }).collect()
+    }
+
+    pub async fn create_supplier(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        name: String,
+        phone: Option<String>,
+        notes: Option<String>,
+    ) -> Result<Supplier, AppError> {
+        let pool = require_pool(pool)?;
+        use sqlx::Row as _;
+        let row = sqlx::query(
+            r#"
+            INSERT INTO suppliers (tenant_id, name, phone, notes)
+            VALUES ($1, $2, $3, $4)
+            RETURNING id, tenant_id, name, phone, notes, created_at, updated_at
+            "#,
+        )
+        .bind(tenant_id)
+        .bind(&name)
+        .bind(&phone)
+        .bind(&notes)
+        .fetch_one(pool)
+        .await
+        .map_err(|err| map_sqlx_error("创建供应商失败", err))?;
+
+        Ok(Supplier {
+            id: row.try_get("id").map_err(|e| map_sqlx_error("id", e))?,
+            tenant_id: row.try_get("tenant_id").map_err(|e| map_sqlx_error("tenant_id", e))?,
+            name: row.try_get("name").map_err(|e| map_sqlx_error("name", e))?,
+            phone: row.try_get("phone").map_err(|e| map_sqlx_error("phone", e))?,
+            notes: row.try_get("notes").map_err(|e| map_sqlx_error("notes", e))?,
+            created_at: row.try_get("created_at").map_err(|e| map_sqlx_error("created_at", e))?,
+            updated_at: row.try_get("updated_at").map_err(|e| map_sqlx_error("updated_at", e))?,
+        })
+    }
+
+    pub async fn update_supplier(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        id: i64,
+        name: Option<String>,
+        phone: Option<String>,
+        notes: Option<String>,
+    ) -> Result<Supplier, AppError> {
+        let pool = require_pool(pool)?;
+        use sqlx::Row as _;
+        let row = sqlx::query(
+            r#"
+            UPDATE suppliers
+            SET name       = COALESCE($3, name),
+                phone      = $4,
+                notes      = $5,
+                updated_at = NOW()
+            WHERE id = $1 AND tenant_id = $2 AND is_deleted = FALSE
+            RETURNING id, tenant_id, name, phone, notes, created_at, updated_at
+            "#,
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .bind(&name)
+        .bind(&phone)
+        .bind(&notes)
+        .fetch_optional(pool)
+        .await
+        .map_err(|err| map_sqlx_error("更新供应商失败", err))?
+        .ok_or_else(|| AppError::not_found("供应商不存在"))?;
+
+        Ok(Supplier {
+            id: row.try_get("id").map_err(|e| map_sqlx_error("id", e))?,
+            tenant_id: row.try_get("tenant_id").map_err(|e| map_sqlx_error("tenant_id", e))?,
+            name: row.try_get("name").map_err(|e| map_sqlx_error("name", e))?,
+            phone: row.try_get("phone").map_err(|e| map_sqlx_error("phone", e))?,
+            notes: row.try_get("notes").map_err(|e| map_sqlx_error("notes", e))?,
+            created_at: row.try_get("created_at").map_err(|e| map_sqlx_error("created_at", e))?,
+            updated_at: row.try_get("updated_at").map_err(|e| map_sqlx_error("updated_at", e))?,
+        })
+    }
+
+    pub async fn delete_supplier(
+        &self,
+        pool: Option<&PgPool>,
+        tenant_id: Uuid,
+        id: i64,
+    ) -> Result<(), AppError> {
+        let pool = require_pool(pool)?;
+        let result = sqlx::query(
+            "UPDATE suppliers SET is_deleted = TRUE, updated_at = NOW() WHERE id = $1 AND tenant_id = $2 AND is_deleted = FALSE",
+        )
+        .bind(id)
+        .bind(tenant_id)
+        .execute(pool)
+        .await
+        .map_err(|err| map_sqlx_error("删除供应商失败", err))?;
+
+        if result.rows_affected() == 0 {
+            return Err(AppError::not_found("供应商不存在"));
+        }
+        Ok(())
+    }
 }
 
 // ── Category 方法 ─────────────────────────────────────────────────────────────

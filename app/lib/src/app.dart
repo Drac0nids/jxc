@@ -19,6 +19,7 @@ import 'features/products/application/batch_controller.dart';
 import 'features/products/application/category_controller.dart';
 import 'features/products/application/product_controller.dart';
 import 'features/products/application/low_stock_controller.dart';
+import 'features/products/application/supplier_controller.dart';
 import 'features/users/application/users_controller.dart';
 
 class JxcApp extends StatefulWidget {
@@ -42,6 +43,7 @@ class _JxcAppState extends State<JxcApp> {
   LowStockController? _lowStockController;
   CategoryController? _categoryController;
   BatchController? _batchController;
+  SupplierController? _supplierController;
   UsersController? _usersController;
   late final TrendController _trendController;
   late final TopSalesController _topSalesController;
@@ -87,6 +89,7 @@ class _JxcAppState extends State<JxcApp> {
     _lowStockController?.dispose();
     _categoryController?.dispose();
     _batchController?.dispose();
+    _supplierController?.dispose();
     _usersController?.dispose();
     super.dispose();
 
@@ -113,6 +116,7 @@ class _JxcAppState extends State<JxcApp> {
         _lowStockController != null &&
         _categoryController != null &&
         _batchController != null &&
+        _supplierController != null &&
         _usersController != null) {
       return;
     }
@@ -153,6 +157,9 @@ class _JxcAppState extends State<JxcApp> {
     _batchController = BatchController(
       repository: _services.batchRepository,
     );
+    _supplierController = SupplierController(
+      repository: _services.supplierRepository,
+    );
     _usersController = UsersController(
       repository: _services.usersRepository,
     );
@@ -169,6 +176,7 @@ class _JxcAppState extends State<JxcApp> {
     _lowStockController?.dispose();
     _categoryController?.dispose();
     _batchController?.dispose();
+    _supplierController?.dispose();
     _usersController?.dispose();
     _inboundController = null;
     _outboundController = null;
@@ -179,6 +187,7 @@ class _JxcAppState extends State<JxcApp> {
     _lowStockController = null;
     _categoryController = null;
     _batchController = null;
+    _supplierController = null;
     _usersController = null;
   }
 
@@ -235,6 +244,7 @@ class _JxcAppState extends State<JxcApp> {
             productController: _productController!,
             categoryController: _categoryController!,
             batchController: _batchController!,
+            supplierController: _supplierController!,
             usersController: _usersController!,
           );
         },

@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 
 import '../application/batch_controller.dart';
+import '../application/supplier_controller.dart';
 import '../models/batch_models.dart';
+import '../models/supplier_models.dart';
 
 /// 新建批次信息弹窗（入库后弹出询问）
 class CreateBatchSheet extends StatefulWidget {
@@ -10,17 +12,20 @@ class CreateBatchSheet extends StatefulWidget {
     required this.productId,
     required this.productName,
     required this.controller,
+    this.supplierController,
   });
 
   final int productId;
   final String productName;
   final BatchController controller;
+  final SupplierController? supplierController;
 
   static Future<BatchData?> show(
     BuildContext context, {
     required int productId,
     required String productName,
     required BatchController controller,
+    SupplierController? supplierController,
   }) {
     return showModalBottomSheet<BatchData>(
       context: context,
@@ -33,6 +38,7 @@ class CreateBatchSheet extends StatefulWidget {
         productId: productId,
         productName: productName,
         controller: controller,
+        supplierController: supplierController,
       ),
     );
   }
@@ -203,15 +209,10 @@ class _CreateBatchSheetState extends State<CreateBatchSheet> {
                     ),
                     const SizedBox(height: 12),
 
-                    // 供应商（可选）
-                    TextFormField(
+                    // 供应商（Autocomplete 下拉 + 手填）
+                    _SupplierAutocomplete(
                       controller: _supplierCtrl,
-                      decoration: const InputDecoration(
-                        labelText: '供应商名称（可选）',
-                        hintText: '如：XX食品有限公司',
-                        prefixIcon: Icon(Icons.store_outlined),
-                        border: OutlineInputBorder(),
-                      ),
+                      supplierController: widget.supplierController,
                     ),
                     const SizedBox(height: 12),
 
@@ -370,6 +371,127 @@ class _DateTile extends StatelessWidget {
               fontSize: 14),
         ),
       ),
+    );
+  }
+}
+
+// ── 供应商 Autocomplete 组件 ───────────────────────────────────────────────────
+
+class _SupplierAutocomplete extends StatefulWidget {
+  const _SupplierAutocomplete({
+    required this.controller,
+    required this.supplierController,
+  });
+
+  final TextEditingController controller;
+  final SupplierController? supplierController;
+
+  @override
+  State<_SupplierAutocomplete> createState() => _SupplierAutocompleteState();
+}
+
+class _SupplierAutocompleteState extends State<_SupplierAutocomplete> {
+  List<SupplierData> _options = <SupplierData>[];
+
+  Future<void> _search(String keyword) async {
+    if (widget.supplierController == null) return;
+    final List<SupplierData> results =
+        await widget.supplierController!.search(keyword);
+    if (mounted) setState(() => _options = results);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // 若无 supplierController，降级为普通 TextFormField
+    if (widget.supplierController == null) {
+      return TextFormField(
+        controller: widget.controller,
+        decoration: const InputDecoration(
+          labelText: '供应商名称（可选）',
+          hintText: '如：XX食品有限公司',
+          prefixIcon: Icon(Icons.store_outlined),
+          border: OutlineInputBorder(),
+        ),
+      );
+    }
+
+    return Autocomplete<SupplierData>(
+      optionsBuilder: (TextEditingValue textEditingValue) async {
+        final String kw = textEditingValue.text;
+        if (kw.isEmpty) {
+          // 空白时加载全部（最近/常用）
+          await _search('');
+        } else {
+          await _search(kw);
+        }
+        return _options;
+      },
+      displayStringForOption: (SupplierData s) => s.name,
+      onSelected: (SupplierData s) {
+        widget.controller.text = s.name;
+      },
+      fieldViewBuilder: (
+        BuildContext context,
+        TextEditingController fieldController,
+        FocusNode focusNode,
+        VoidCallback onFieldSubmitted,
+      ) {
+        // 同步外部 controller 值到 Autocomplete 的内部 controller
+        if (fieldController.text != widget.controller.text) {
+          fieldController.text = widget.controller.text;
+        }
+        fieldController.addListener(() {
+          widget.controller.text = fieldController.text;
+        });
+        return TextFormField(
+          controller: fieldController,
+          focusNode: focusNode,
+          decoration: const InputDecoration(
+            labelText: '供应商名称（可选）',
+            hintText: '输入搜索已有供应商，或直接手填',
+            prefixIcon: Icon(Icons.store_outlined),
+            border: OutlineInputBorder(),
+          ),
+          onTap: () async {
+            // 聚焦时预加载列表
+            await _search('');
+          },
+        );
+      },
+      optionsViewBuilder: (
+        BuildContext context,
+        AutocompleteOnSelected<SupplierData> onSelected,
+        Iterable<SupplierData> options,
+      ) {
+        return Align(
+          alignment: Alignment.topLeft,
+          child: Material(
+            elevation: 4,
+            borderRadius: BorderRadius.circular(8),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxHeight: 200, maxWidth: 340),
+              child: ListView.builder(
+                padding: EdgeInsets.zero,
+                shrinkWrap: true,
+                itemCount: options.length,
+                itemBuilder: (BuildContext context, int index) {
+                  final SupplierData s = options.elementAt(index);
+                  return ListTile(
+                    dense: true,
+                    leading: const Icon(Icons.store_rounded, size: 18),
+                    title: Text(s.name),
+                    subtitle: s.phone != null
+                        ? Text(s.phone!,
+                            style: const TextStyle(fontSize: 11))
+                        : null,
+                    onTap: () => onSelected(s),
+                  );
+                },
+              ),
+            ),
+          ),
+        );
+      },
     );
   }
 }

@@ -9,6 +9,7 @@ pub mod purchase_orders;
 pub mod reports;
 pub mod sales_orders;
 pub mod stock_checks;
+pub mod suppliers;
 pub mod users;
 
 use axum::{
@@ -137,6 +138,15 @@ pub fn protected_routes() -> Router<AppState> {
             put(batches::update_batch).delete(batches::delete_batch),
         )
         .route("/batches/:id/sold-out", post(batches::mark_sold_out))
+        // 供应商
+        .route(
+            "/suppliers",
+            get(suppliers::list_suppliers).post(suppliers::create_supplier),
+        )
+        .route(
+            "/suppliers/:id",
+            put(suppliers::update_supplier).delete(suppliers::delete_supplier),
+        )
 }
 
 pub async fn health(headers: HeaderMap) -> Response {
