@@ -702,9 +702,9 @@ class _ItemsTable extends StatelessWidget {
                         color: scheme.onSurfaceVariant)),
               ),
               SizedBox(
-                width: 36,
+                width: 60,
                 child: Text('数量',
-                    textAlign: TextAlign.right,
+                    textAlign: TextAlign.center,
                     style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w700,
@@ -776,10 +776,10 @@ class _ItemRow extends StatelessWidget {
                 ),
               ),
               SizedBox(
-                width: 36,
+                width: 60,
                 child: Text(
                   '${item.qty}',
-                  textAlign: TextAlign.right,
+                  textAlign: TextAlign.center,
                   style: TextStyle(
                       fontSize: 13, color: scheme.onSurfaceVariant),
                 ),

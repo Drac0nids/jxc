@@ -19,6 +19,7 @@ import '../../products/application/low_stock_controller.dart';
 import '../../products/application/product_controller.dart';
 import '../../products/application/supplier_controller.dart';
 import '../../products/presentation/batch_management_page.dart';
+import '../../products/presentation/expiring_batches_page.dart';
 import '../../products/presentation/low_stock_page.dart';
 import '../../products/presentation/products_page.dart';
 import '../../users/application/users_controller.dart';
@@ -790,12 +791,9 @@ class _DashboardPageState extends State<DashboardPage>
                           onTap: expiring.isEmpty
                               ? null
                               : () {
-                                  final first = expiring.first;
                                   Navigator.of(ctx)
                                       .push(MaterialPageRoute<void>(
-                                    builder: (_) => BatchManagementPage(
-                                      productId: first.batch.productId,
-                                      productName: first.productName,
+                                    builder: (_) => ExpiringBatchesPage(
                                       controller: widget.batchController,
                                     ),
                                   ));
