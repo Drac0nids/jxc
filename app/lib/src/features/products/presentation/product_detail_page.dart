@@ -97,11 +97,23 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
         ) ??
         false;
     if (!confirmed || !mounted) return;
-    await widget.controller.deleteProduct(
-      id: _product.id,
-      expectedVersion: _product.version,
-    );
-    if (mounted) Navigator.of(context).pop(true); // 通知列表页刷新
+    try {
+      await widget.controller.deleteProduct(
+        id: _product.id,
+        expectedVersion: _product.version,
+      );
+      if (mounted) Navigator.of(context).pop(true); // 通知列表页刷新
+    } catch (e) {
+      if (!mounted) return;
+      final msg = e.toString().replaceFirst('Exception: ', '');
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('删除失败：$msg'),
+          backgroundColor: Theme.of(context).colorScheme.error,
+          duration: const Duration(seconds: 4),
+        ),
+      );
+    }
   }
 
   @override
@@ -281,7 +293,7 @@ class _ProductDetailPageState extends State<ProductDetailPage> {
                       active: p.trackBatches,
                     ),
                     _FeatureChip(
-                      label: '序列号追踪',
+                      label: '流水码追踪',
                       icon: Icons.qr_code_2_rounded,
                       active: p.trackSerials,
                     ),

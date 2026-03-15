@@ -382,6 +382,11 @@ pub async fn list_products(
         filtered.retain(|p| p.barcode == *barcode);
     }
 
+    // 分类过滤在排序之前执行，确保 total 和排序结果正确
+    if let Some(cat_id) = query.category_id {
+        filtered.retain(|p| p.category_id == Some(cat_id));
+    }
+
     let low_stock_only = query
         .low_stock
         .as_deref()
@@ -399,10 +404,6 @@ pub async fn list_products(
         });
     } else {
         filtered.sort_by_key(|p| p.id);
-    }
-
-    if let Some(cat_id) = query.category_id {
-        filtered.retain(|p| p.category_id == Some(cat_id));
     }
 
     let total = filtered.len() as u64;
@@ -762,6 +763,7 @@ pub async fn update_product(
         && retail_price.is_none()
         && req.category_id.is_none()
         && req.track_batches.is_none()
+        && req.track_serials.is_none()
     {
         return Err(AppError::bad_request("至少提供一个可更新字段").with_request_id(request_id));
     }

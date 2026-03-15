@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../network/api_exception.dart';
+import '../../../network/exception_utils.dart';
 import '../models/users_models.dart';
 import '../models/users_repository.dart';
 
@@ -39,7 +40,7 @@ class UsersController extends ChangeNotifier {
     try {
       _list = await _repository.listUsers();
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
     } finally {
       _loading = false;
       notifyListeners();
@@ -61,7 +62,7 @@ class UsersController extends ChangeNotifier {
       await load();
       return true;
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
       notifyListeners();
       return false;
     } finally {
@@ -86,7 +87,7 @@ class UsersController extends ChangeNotifier {
       await load();
       return true;
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
       notifyListeners();
       return false;
     } finally {
@@ -111,7 +112,7 @@ class UsersController extends ChangeNotifier {
       notifyListeners();
       return true;
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
       notifyListeners();
       return false;
     } finally {
@@ -135,7 +136,7 @@ class UsersController extends ChangeNotifier {
       await load();
       return true;
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
       notifyListeners();
       return false;
     } finally {
@@ -146,16 +147,5 @@ class UsersController extends ChangeNotifier {
 
   // ── Error humanizer ───────────────────────────────────────────────────────
 
-  String _humanize(Object error) {
-    if (error is ApiException) {
-      if (error.code == 4090) return '用户名已存在（code=4090）';
-      if (error.code == 4030) return '无权限执行该操作（code=4030）';
-      return '${error.message}（code=${error.code}）';
-    }
-    if (error is FormatException) return error.message;
-    if (error is Exception) {
-      return error.toString().replaceFirst('Exception: ', '');
-    }
-    return '操作失败，请稍后重试';
-  }
+  String _humanizeError(Object error) => humanizeError(error);
 }

@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
@@ -23,13 +24,14 @@ class _AuthPageState extends State<AuthPage> {
   bool _isRegisterMode = false;
   bool _obscurePassword = true;
 
-  final TextEditingController _tenantCodeController = TextEditingController(text: 'DEMO01');
+  final TextEditingController _tenantCodeController =
+      TextEditingController(text: kDebugMode ? 'DEMO01' : '');
   final TextEditingController _tenantNameController = TextEditingController();
   final TextEditingController _usernameController =
-      TextEditingController(text: 'admin');
+      TextEditingController(text: kDebugMode ? 'admin' : '');
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _passwordController =
-      TextEditingController(text: 'admin123');
+      TextEditingController(text: kDebugMode ? 'admin123' : '');
 
   @override
   void initState() {

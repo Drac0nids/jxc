@@ -1,5 +1,6 @@
 import 'package:flutter/foundation.dart';
 
+import '../../../network/exception_utils.dart';
 import '../models/batch_models.dart';
 
 class BatchController extends ChangeNotifier {
@@ -47,7 +48,7 @@ class BatchController extends ChangeNotifier {
         onlyActive: onlyActive,
       );
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
     } finally {
       _loading = false;
       notifyListeners();
@@ -65,7 +66,7 @@ class BatchController extends ChangeNotifier {
     try {
       _expiring = await _repository.listExpiringBatches(withinDays: withinDays);
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
     } finally {
       _loading = false;
       notifyListeners();
@@ -84,7 +85,7 @@ class BatchController extends ChangeNotifier {
       final batch = await _repository.createBatch(req);
       return batch;
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
       return null;
     } finally {
       _submitting = false;
@@ -108,7 +109,7 @@ class BatchController extends ChangeNotifier {
       }
       return updated;
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
       return null;
     } finally {
       _submitting = false;
@@ -135,7 +136,7 @@ class BatchController extends ChangeNotifier {
       _expiring = _expiring.where((e) => e.batch.id != id).toList();
       return true;
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
       return false;
     } finally {
       _submitting = false;
@@ -157,7 +158,7 @@ class BatchController extends ChangeNotifier {
       _expiring = _expiring.where((e) => e.batch.id != id).toList();
       return true;
     } catch (e) {
-      _errorMessage = _humanize(e);
+      _errorMessage = _humanizeError(e);
       return false;
     } finally {
       _submitting = false;
@@ -165,11 +166,5 @@ class BatchController extends ChangeNotifier {
     }
   }
 
-  String _humanize(Object error) {
-    final s = error.toString();
-    if (s.contains('Exception:')) {
-      return s.replaceFirst('Exception: ', '');
-    }
-    return '操作失败，请稍后重试';
-  }
+  String _humanizeError(Object error) => humanizeError(error);
 }

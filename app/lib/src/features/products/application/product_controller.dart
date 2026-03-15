@@ -2,6 +2,7 @@ import 'package:flutter/foundation.dart';
 
 import '../../../core/models/user_role.dart';
 import '../../../network/api_exception.dart';
+import '../../../network/exception_utils.dart';
 import '../models/product_models.dart';
 import '../models/product_repository.dart';
 
@@ -222,36 +223,5 @@ class ProductController extends ChangeNotifier {
     }
   }
 
-  String _humanizeError(Object error) {
-    if (error is ApiException) {
-      if (error.code == 4091) {
-        return '版本冲突，请刷新后重试（code=4091）';
-      }
-      if (error.code == 4090) {
-        return '${error.message}（code=4090）';
-      }
-      if (error.code == 4002) {
-        return '${error.message}（code=4002）';
-      }
-      if (error.code == 4030) {
-        return '当前账号无权限执行该操作（code=4030）';
-      }
-
-      final requestIdPart =
-          (error.requestId == null || error.requestId!.isEmpty)
-              ? ''
-              : '，request_id=${error.requestId}';
-      return '${error.message}（code=${error.code}$requestIdPart）';
-    }
-
-    if (error is FormatException) {
-      return error.message;
-    }
-
-    if (error is Exception) {
-      return error.toString().replaceFirst('Exception: ', '');
-    }
-
-    return '商品操作失败，请稍后重试';
-  }
+  String _humanizeError(Object error) => humanizeError(error);
 }

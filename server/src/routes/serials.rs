@@ -1,6 +1,6 @@
 use axum::{
     Json,
-    extract::{Extension, Path, Query, State},
+    extract::{Extension, Query, State},
     http::HeaderMap,
     response::{IntoResponse, Response},
     http::StatusCode,
@@ -15,13 +15,16 @@ use crate::{
     extractors::AppJson,
     middleware::AuthContext,
     response::{ApiResponse, build_response_headers, resolve_request_id},
-    routes::common::{ensure_role, postgres_pool_or_none},
+    routes::common::{
+        ensure_role, generate_server_biz_no, postgres_pool_or_none,
+        require_idempotency_key, save_idempotency_record, try_idempotent_replay,
+    },
     state::AppState,
 };
 
 // ── Request / Query types ─────────────────────────────────────────────────────
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 pub struct SerialInboundRequest {
     pub product_id: i64,
     pub batch_id: Option<Uuid>,
@@ -30,7 +33,7 @@ pub struct SerialInboundRequest {
     pub sns: Vec<String>,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, serde::Serialize)]
 pub struct SerialOutboundRequest {
     #[serde(default)]
     pub sell_price: Option<String>,
@@ -68,10 +71,9 @@ fn parse_optional_decimal(s: &Option<String>, field: &str, request_id: &str) -> 
     }
 }
 
+// 使用与其他操作一致的带随机后缀的业务单号，避免并发碰撞
 fn serial_biz_no() -> String {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let ts = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis();
-    format!("SN-{ts}")
+    generate_server_biz_no("SN")
 }
 
 // ── serial_inbound ────────────────────────────────────────────────────────────
@@ -84,6 +86,20 @@ pub async fn serial_inbound(
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
+
+    let idempotency_key = require_idempotency_key(&headers, &request_id)?;
+    let request_payload = serde_json::to_value(&req).map_err(|_| {
+        AppError::internal("流水码入库请求序列化失败").with_request_id(request_id.clone())
+    })?;
+    let scope_key = format!(
+        "{}:{}:{}:{}",
+        auth.tenant_id, "POST", "/api/v1/serials/inbound", idempotency_key
+    );
+    if let Some(replayed) =
+        try_idempotent_replay(&state, &scope_key, &request_payload, &request_id).await?
+    {
+        return Ok(replayed);
+    }
 
     if req.sns.is_empty() {
         return Err(AppError::bad_request("sns 不能为空").with_request_id(request_id));
@@ -109,6 +125,11 @@ pub async fn serial_inbound(
         json!({ "biz_no": biz_no, "count": req.sns.len() }),
         request_id.clone(),
     );
+    let response_body = serde_json::to_value(&body).map_err(|_| {
+        AppError::internal("流水码入库响应序列化失败").with_request_id(request_id.clone())
+    })?;
+    save_idempotency_record(&state, &scope_key, request_payload, response_body).await?;
+
     Ok((StatusCode::OK, build_response_headers(&request_id, false), Json(body)).into_response())
 }
 
@@ -121,7 +142,22 @@ pub async fn serial_outbound(
     AppJson(req): AppJson<SerialOutboundRequest>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    ensure_role(&auth.role, &["OWNER", "ADMIN", "SALES"], &request_id)?;
+    // PURCHASER 也可做流水码出库（如采购退货场景）
+    ensure_role(&auth.role, &["OWNER", "ADMIN", "SALES", "PURCHASER"], &request_id)?;
+
+    let idempotency_key = require_idempotency_key(&headers, &request_id)?;
+    let request_payload = serde_json::to_value(&req).map_err(|_| {
+        AppError::internal("流水码出库请求序列化失败").with_request_id(request_id.clone())
+    })?;
+    let scope_key = format!(
+        "{}:{}:{}:{}",
+        auth.tenant_id, "POST", "/api/v1/serials/outbound", idempotency_key
+    );
+    if let Some(replayed) =
+        try_idempotent_replay(&state, &scope_key, &request_payload, &request_id).await?
+    {
+        return Ok(replayed);
+    }
 
     if req.sns.is_empty() {
         return Err(AppError::bad_request("sns 不能为空").with_request_id(request_id));
@@ -152,6 +188,11 @@ pub async fn serial_outbound(
         json!({ "biz_no": biz_no, "count": list.len(), "list": list }),
         request_id.clone(),
     );
+    let response_body = serde_json::to_value(&body).map_err(|_| {
+        AppError::internal("流水码出库响应序列化失败").with_request_id(request_id.clone())
+    })?;
+    save_idempotency_record(&state, &scope_key, request_payload, response_body).await?;
+
     Ok((StatusCode::OK, build_response_headers(&request_id, false), Json(body)).into_response())
 }
 

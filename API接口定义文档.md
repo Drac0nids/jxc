@@ -1788,3 +1788,19 @@
 1. 旧版客户端不传 `track_batches`，服务端创建商品时默认 `false`，行为不变。
 2. 现有批次 CRUD 接口（`/products/{id}/batches/*`）语义不变，`track_batches` 仅影响入库后的客户端弹窗触发逻辑。
 3. 不引入新的库存流水类型或错误码，权限模型保持不变。
+
+## 19. 流水码接口幂等性与权限说明（v1.6.21）
+
+### 19.1 POST /api/v1/serials/inbound
+
+- 现在要求请求头携带 `X-Idempotency-Key`，与其他写操作一致。
+- 重复请求（网络重试）将返回首次操作的缓存响应，不会重复入库。
+
+### 19.2 POST /api/v1/serials/outbound
+
+- 现在要求请求头携带 `X-Idempotency-Key`，与其他写操作一致。
+- 权限角色调整：由原来的 `OWNER/ADMIN/SALES` 增加 `PURCHASER`，支持采购退货逐码出库场景。
+
+### 19.3 PUT /api/v1/products/:id 字段修正
+
+- `track_serials` 字段现在可单独更新，无需同时提供其他字段。

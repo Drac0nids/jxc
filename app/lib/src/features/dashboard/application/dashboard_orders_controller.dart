@@ -1,6 +1,7 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../network/api_exception.dart';
+import '../../../network/exception_utils.dart';
 import '../models/dashboard_data.dart';
 import '../models/dashboard_repository.dart';
 
@@ -110,23 +111,5 @@ class DashboardOrdersController extends ChangeNotifier {
     return parsed;
   }
 
-  String _humanizeError(Object error) {
-    if (error is ApiException) {
-      final requestIdPart =
-          (error.requestId == null || error.requestId!.isEmpty)
-              ? ''
-              : '，request_id=${error.requestId}';
-      return '${error.message}（code=${error.code}$requestIdPart）';
-    }
-
-    if (error is FormatException) {
-      return error.message;
-    }
-
-    if (error is Exception) {
-      return error.toString().replaceFirst('Exception: ', '');
-    }
-
-    return '订单下钻查询失败，请稍后重试';
-  }
+  String _humanizeError(Object error) => humanizeError(error);
 }
