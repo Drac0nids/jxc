@@ -23,6 +23,9 @@ import '../../products/presentation/low_stock_page.dart';
 import '../../products/presentation/products_page.dart';
 import '../../users/application/users_controller.dart';
 import '../../users/presentation/users_page.dart';
+import '../../serials/models/serial_repository.dart';
+import '../../serials/presentation/serial_inbound_page.dart';
+import '../../serials/presentation/serial_outbound_page.dart';
 import '../application/dashboard_controller.dart';
 import '../application/dashboard_orders_controller.dart';
 import '../application/top_sales_controller.dart';
@@ -43,6 +46,8 @@ enum _QuickActionType {
   stockCheck,
   products,
   users,
+  serialInbound,
+  serialOutbound,
 }
 
 /// 首页「作业入口」扫码模式标记（用于区分确认写入 vs 连续扫码）
@@ -90,6 +95,7 @@ class DashboardPage extends StatefulWidget {
     required this.batchController,
     required this.supplierController,
     required this.usersController,
+    required this.serialRepository,
   });
 
   final SessionController sessionController;
@@ -109,6 +115,7 @@ class DashboardPage extends StatefulWidget {
   final BatchController batchController;
   final SupplierController supplierController;
   final UsersController usersController;
+  final SerialRepository serialRepository;
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
@@ -402,6 +409,23 @@ class _DashboardPageState extends State<DashboardPage>
           ),
         ));
         // 人员管理返回无需刷新看板数据
+
+      case _QuickActionType.serialInbound:
+        await Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => SerialInboundPage(
+            repository: widget.serialRepository,
+            productController: widget.productController,
+          ),
+        ));
+        if (mounted) _load();
+
+      case _QuickActionType.serialOutbound:
+        await Navigator.of(context).push(MaterialPageRoute<void>(
+          builder: (_) => SerialOutboundPage(
+            repository: widget.serialRepository,
+          ),
+        ));
+        if (mounted) _load();
     }
   }
 
@@ -532,6 +556,24 @@ class _DashboardPageState extends State<DashboardPage>
               subtitle: '建档/查询/维护',
               icon: Icons.inventory_2_rounded,
               color: Color(0xFF64748B),
+              enabled: true,
+            ),
+          if (canInbound)
+            const _QuickActionItem(
+              type: _QuickActionType.serialInbound,
+              title: '序列号入库',
+              subtitle: '手机/设备逐台录入',
+              icon: Icons.qr_code_2_rounded,
+              color: Color(0xFF0EA5E9),
+              enabled: true,
+            ),
+          if (canOutbound)
+            const _QuickActionItem(
+              type: _QuickActionType.serialOutbound,
+              title: '序列号出库',
+              subtitle: '扫 SN 直接出库',
+              icon: Icons.document_scanner_rounded,
+              color: Color(0xFFEC4899),
               enabled: true,
             ),
         ];

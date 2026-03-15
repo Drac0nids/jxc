@@ -13,6 +13,7 @@ class ProductData {
     required this.version,
     this.categoryId,
     this.trackBatches = false,
+    this.trackSerials = false,
   });
 
   final int id;
@@ -28,6 +29,7 @@ class ProductData {
   final int version;
   final int? categoryId;
   final bool trackBatches;
+  final bool trackSerials;
 
   factory ProductData.fromJson(Map<String, dynamic> json) {
     return ProductData(
@@ -44,6 +46,7 @@ class ProductData {
       version: _toInt(json['version']),
       categoryId: json['category_id'] is int ? json['category_id'] as int : null,
       trackBatches: json['track_batches'] == true,
+      trackSerials: json['track_serials'] == true,
     );
   }
 }
@@ -105,6 +108,7 @@ class CreateProductRequest {
     required this.costPrice,
     this.categoryId,
     this.trackBatches,
+    this.trackSerials,
   });
 
   final String? sku;
@@ -117,6 +121,7 @@ class CreateProductRequest {
   final String costPrice;
   final int? categoryId;
   final bool? trackBatches;
+  final bool? trackSerials;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -130,6 +135,7 @@ class CreateProductRequest {
       'cost_price': costPrice.trim(),
       if (categoryId != null) 'category_id': categoryId,
       if (trackBatches != null) 'track_batches': trackBatches,
+      if (trackSerials != null) 'track_serials': trackSerials,
     };
   }
 }
@@ -145,6 +151,7 @@ class UpdateProductRequest {
     this.expectedVersion,
     this.categoryId,
     this.trackBatches,
+    this.trackSerials,
   });
 
   final String? sku;
@@ -156,6 +163,7 @@ class UpdateProductRequest {
   final int? expectedVersion;
   final int? categoryId;
   final bool? trackBatches;
+  final bool? trackSerials;
 
   Map<String, dynamic> toJson() {
     return <String, dynamic>{
@@ -170,6 +178,7 @@ class UpdateProductRequest {
       if (expectedVersion != null) 'expected_version': expectedVersion,
       if (categoryId != null) 'category_id': categoryId,
       if (trackBatches != null) 'track_batches': trackBatches,
+      if (trackSerials != null) 'track_serials': trackSerials,
     };
   }
 }

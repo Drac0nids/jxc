@@ -246,6 +246,7 @@ class _JxcAppState extends State<JxcApp> {
             batchController: _batchController!,
             supplierController: _supplierController!,
             usersController: _usersController!,
+            serialRepository: _services.serialRepository,
           );
         },
       ),

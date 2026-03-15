@@ -36,6 +36,7 @@ class _ProductsEditPageState extends State<ProductsEditPage> {
 
   int? _selectedCategoryId;
   late bool _trackBatches;
+  late bool _trackSerials;
   String? _localError;
 
   @override
@@ -53,6 +54,7 @@ class _ProductsEditPageState extends State<ProductsEditPage> {
         TextEditingController(text: '${widget.product.version}');
     _selectedCategoryId = widget.product.categoryId;
     _trackBatches = widget.product.trackBatches;
+    _trackSerials = widget.product.trackSerials;
   }
 
   @override
@@ -194,6 +196,22 @@ class _ProductsEditPageState extends State<ProductsEditPage> {
                 contentPadding: EdgeInsets.zero,
                 dense: true,
               ),
+              SwitchListTile(
+                value: _trackSerials,
+                onChanged: submitting
+                    ? null
+                    : (bool v) => setState(() => _trackSerials = v),
+                title: const Text(
+                  '每件独立 SN 码',
+                  style: TextStyle(fontSize: 14, fontWeight: FontWeight.w600),
+                ),
+                subtitle: const Text(
+                  '开启后，该商品每台均需录入序列号（IMEI/SN），适用于手机、电子设备等高值商品',
+                  style: TextStyle(fontSize: 12),
+                ),
+                contentPadding: EdgeInsets.zero,
+                dense: true,
+              ),
               if (_localError != null) ...<Widget>[
                 const SizedBox(height: 10),
                 Text(
@@ -326,6 +344,7 @@ class _ProductsEditPageState extends State<ProductsEditPage> {
     setState(() {
       _selectedCategoryId = widget.product.categoryId;
       _trackBatches = widget.product.trackBatches;
+      _trackSerials = widget.product.trackSerials;
       _localError = null;
     });
   }
@@ -370,6 +389,7 @@ class _ProductsEditPageState extends State<ProductsEditPage> {
         expectedVersion: int.tryParse(_expectedVersionController.text.trim()),
         categoryId: _selectedCategoryId,
         trackBatches: _trackBatches,
+        trackSerials: _trackSerials,
       ),
     );
 

@@ -7,6 +7,7 @@ import '../features/products/models/category_repository.dart';
 import '../features/products/models/product_repository.dart';
 import '../features/products/models/supplier_repository.dart';
 import '../features/users/models/users_repository.dart';
+import '../features/serials/models/serial_repository.dart';
 import '../network/api_client.dart';
 import '../storage/session_storage.dart';
 
@@ -22,6 +23,7 @@ class AppServices {
     required this.batchRepository,
     required this.supplierRepository,
     required this.usersRepository,
+    required this.serialRepository,
   });
 
   final SessionStorage sessionStorage;
@@ -34,6 +36,7 @@ class AppServices {
   final BatchRepository batchRepository;
   final SupplierRepository supplierRepository;
   final UsersRepository usersRepository;
+  final SerialRepository serialRepository;
 
   factory AppServices.bootstrap() {
     final sessionStorage = SessionStorage();
@@ -53,6 +56,7 @@ class AppServices {
       batchRepository: BatchRepository(client: apiClient),
       supplierRepository: SupplierRepository(client: apiClient),
       usersRepository: UsersRepository(client: apiClient),
+      serialRepository: SerialRepository(client: apiClient),
     );
   }
 }
