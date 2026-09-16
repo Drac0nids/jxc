@@ -1,0 +1,137 @@
+name: ci
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  version-consistency:
+    name: 版本号一致性
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: 校验五处版本声明一致
+        run: |
+          set -euo pipefail
+          pub=$(sed -n 's/^version:[[:space:]]*//p' app/pubspec.yaml | head -1 | cut -d+ -f1)
+          pkg=$(python3 -c "import json;print(json.load(open('client/package.json'))['version'])")
+          tauri=$(python3 -c "import json;print(json.load(open('client/src-tauri/tauri.conf.json'))['version'])")
+          tauri_cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' client/src-tauri/Cargo.toml | head -1)
+          server_cargo=$(sed -n 's/^version = "\(.*\)"/\1/p' server/Cargo.toml | head -1)
+
+          echo "app/pubspec.yaml               = $pub"
+          echo "client/package.json            = $pkg"
+          echo "client/src-tauri/tauri.conf.json = $tauri"
+          echo "client/src-tauri/Cargo.toml    = $tauri_cargo"
+          echo "server/Cargo.toml              = $server_cargo"
+
+          for v in "$pkg" "$tauri" "$tauri_cargo" "$server_cargo"; do
+            if [ "$v" != "$pub" ]; then
+              echo "::error::版本号不一致：$pub vs $v"
+              exit 1
+            fi
+          done
+          echo "OK: 五处版本声明一致（$pub）"
+
+  server-tests:
+    name: 服务端测试（含 Postgres 回归）
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: server
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: jxc
+          POSTGRES_PASSWORD: jxc
+          POSTGRES_DB: jxc_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U jxc -d jxc_test"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      TEST_DATABASE_URL: postgres://jxc:jxc@127.0.0.1:5432/jxc_test
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: server -> target
+
+      # 配置了 TEST_DATABASE_URL 后，Postgres 仓储回归测试不再跳过
+      - name: Run tests
+        run: cargo test --locked
+
+  android-checks:
+    name: Android 静态检查与单测
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: app
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          flutter-version: 3.41.4
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  client-checks:
+    name: Windows 客户端检查
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: client
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: client/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Build
+        run: npm run build
