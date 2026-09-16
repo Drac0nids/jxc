@@ -26,13 +26,21 @@ JNI_LIBS_DIR="$APP_DIR/android/app/src/main/jniLibs"
 ABIS="${ABIS:-arm64-v8a armeabi-v7a}"
 
 if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
-  NDK_CANDIDATE="$(ls -d /opt/homebrew/share/android-commandlinetools/ndk/* 2>/dev/null | tail -1 || true)"
-  if [[ -n "$NDK_CANDIDATE" ]]; then
-    export ANDROID_NDK_HOME="$NDK_CANDIDATE"
-  else
-    echo "[error] 未找到 NDK，请设置 ANDROID_NDK_HOME" >&2
-    exit 1
-  fi
+  # 依次尝试常见位置：本机 Homebrew cmdline-tools、CI 上的 ANDROID_SDK_ROOT / ANDROID_HOME
+  for base in /opt/homebrew/share/android-commandlinetools "${ANDROID_SDK_ROOT:-}" "${ANDROID_HOME:-}"; do
+    if [[ -n "$base" && -d "$base/ndk" ]]; then
+      NDK_CANDIDATE="$(ls -d "$base"/ndk/* 2>/dev/null | tail -1 || true)"
+      if [[ -n "$NDK_CANDIDATE" ]]; then
+        export ANDROID_NDK_HOME="$NDK_CANDIDATE"
+        break
+      fi
+    fi
+  done
+fi
+
+if [[ -z "${ANDROID_NDK_HOME:-}" ]]; then
+  echo "[error] 未找到 NDK，请设置 ANDROID_NDK_HOME" >&2
+  exit 1
 fi
 echo "[build] NDK: $ANDROID_NDK_HOME"
 

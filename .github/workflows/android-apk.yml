@@ -1,0 +1,80 @@
+name: android-apk
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_reason:
+        description: "构建说明（可选）"
+        required: false
+        type: string
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      - "app/**"
+      - "server/**"
+      - "scripts/build-android-local.sh"
+      - ".github/workflows/android-apk.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Setup Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android,armv7-linux-androideabi
+
+      - name: Cache Rust build
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: server -> target
+
+      - name: Install cargo-ndk
+        run: cargo install cargo-ndk --locked
+
+      # GitHub runner 的 Android SDK 自带 NDK，由构建脚本自动探测
+      - name: Build APK (embedded server + Flutter)
+        run: ./scripts/build-android-local.sh
+
+      - name: Verify APK contains embedded server
+        run: |
+          set -euo pipefail
+          APK="app/build/app/outputs/flutter-apk/app-release.apk"
+          test -f "$APK" || { echo "APK not found at $APK"; exit 1; }
+          unzip -l "$APK" | grep -q "lib/arm64-v8a/libjxc_server.so" \
+            || { echo "libjxc_server.so (arm64) missing from APK"; exit 1; }
+          unzip -l "$APK" | grep -q "lib/armeabi-v7a/libjxc_server.so" \
+            || { echo "libjxc_server.so (armv7) missing from APK"; exit 1; }
+          ls -lh "$APK"
+
+      - name: Upload APK artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: jxc-android-apk
+          path: app/build/app/outputs/flutter-apk/app-release.apk
+          if-no-files-found: error
