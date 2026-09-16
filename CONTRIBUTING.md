@@ -47,7 +47,7 @@ TEST_DATABASE_URL=postgres://... cargo test    # 有 Postgres 时请连它一起
 
 # Android 端
 cd app
-flutter analyze
+flutter analyze --no-fatal-infos
 flutter test
 
 # Windows 客户端

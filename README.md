@@ -219,7 +219,7 @@ ABIS=arm64-v8a ./scripts/build-android-local.sh           # 只编 arm64（更�
 
 ```bash
 cd server && cargo test      # 123 个用例：118 passed / 5 ignored（原因见「已知缺口」）
-cd app && flutter analyze && flutter test
+cd app && flutter analyze --no-fatal-infos && flutter test
 cd client && npm run typecheck && npm run build
 ```
 

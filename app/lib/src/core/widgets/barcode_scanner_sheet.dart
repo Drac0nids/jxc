@@ -262,13 +262,12 @@ class _ScanEntry {
     required this.barcode,
     required this.label, // null = 未命中
     required this.time,
-    this.undone = false,
   });
 
   final String barcode;
   final String? label;
   final DateTime time;
-  bool undone; // 是否已撤销
+  bool undone = false; // 是否已撤销
 
   bool get success => label != null;
 }

@@ -18,7 +18,6 @@ import '../../products/application/category_controller.dart';
 import '../../products/application/low_stock_controller.dart';
 import '../../products/application/product_controller.dart';
 import '../../products/application/supplier_controller.dart';
-import '../../products/presentation/batch_management_page.dart';
 import '../../products/presentation/expiring_batches_page.dart';
 import '../../products/presentation/low_stock_page.dart';
 import '../../products/presentation/products_page.dart';
@@ -1185,7 +1184,6 @@ class _MetricCard extends StatelessWidget {
     required this.icon,
     required this.accentColor,
     this.isCurrency = false,
-    this.isAlert = false,
     this.onTap,
   });
 
@@ -1194,7 +1192,6 @@ class _MetricCard extends StatelessWidget {
   final IconData icon;
   final Color accentColor;
   final bool isCurrency;
-  final bool isAlert;
   final VoidCallback? onTap;
 
   @override
@@ -1252,8 +1249,6 @@ class _MetricCard extends StatelessWidget {
                             ?.copyWith(
                               fontWeight: FontWeight.w800,
                               letterSpacing: -0.5,
-                              // P2: alert color when isAlert
-                              color: isAlert ? accentColor : null,
                             ),
                       );
                     },

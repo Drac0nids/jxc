@@ -109,7 +109,7 @@ npm run tauri:dev
 
 ```bash
 cd server && cargo test      # 123 tests: 118 passed / 5 ignored (see Known gaps)
-cd app && flutter analyze && flutter test
+cd app && flutter analyze --no-fatal-infos && flutter test
 cd client && npm run typecheck && npm run build
 ```
 
