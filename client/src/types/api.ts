@@ -115,6 +115,8 @@ export interface ProductData {
   cost_price: string | null
   min_stock_limit: number
   version: number
+  track_batches?: boolean
+  track_serials?: boolean
 }
 
 export interface ScanProductData {
@@ -162,6 +164,8 @@ export interface CreateProductRequest {
   init_stock?: number
   min_stock_limit?: number
   cost_price: string
+  track_batches?: boolean
+  track_serials?: boolean
 }
 
 export interface UpdateProductRequest {
@@ -172,6 +176,8 @@ export interface UpdateProductRequest {
   retail_price?: string
   min_stock_limit?: number
   expected_version?: number
+  track_batches?: boolean
+  track_serials?: boolean
 }
 
 export interface DeleteProductQuery {
@@ -309,6 +315,7 @@ export interface InboundResponseData {
   current_stock: number
   cost_price: string
   version: number
+  track_batches?: boolean
 }
 
 export interface InboundBatchItemResponseData {
@@ -316,6 +323,7 @@ export interface InboundBatchItemResponseData {
   current_stock: number
   cost_price: string
   version: number
+  track_batches?: boolean
 }
 
 export interface InboundBatchResponseData {
@@ -526,4 +534,93 @@ export interface StockLogQuery {
   operator_id?: string
   start_date?: string
   end_date?: string
+}
+
+// ── Suppliers ─────────────────────────────────────────────────────────────────
+
+export interface SupplierData {
+  id: number
+  name: string
+  phone: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface CreateSupplierRequest {
+  name: string
+  phone?: string
+  notes?: string
+}
+
+export interface UpdateSupplierRequest {
+  name?: string
+  phone?: string | null
+  notes?: string | null
+}
+
+// ── Categories ────────────────────────────────────────────────────────────────
+
+export interface CategoryTreeData {
+  id: number
+  name: string
+  level: number
+  sort_order: number
+  parent_id: number | null
+  children: CategoryTreeData[]
+}
+
+export interface CreateCategoryRequest {
+  name: string
+  parent_id?: number
+  sort_order?: number
+}
+
+export interface UpdateCategoryRequest {
+  name?: string
+  sort_order?: number
+}
+
+// ── Batches ───────────────────────────────────────────────────────────────────
+
+export type BatchExpiryLevel = 'EXPIRED' | 'CRITICAL' | 'WARNING' | 'NOTICE' | 'OK'
+
+export interface BatchData {
+  id: number
+  product_id: number
+  lot_number: string
+  supplier: string | null
+  inbound_at: string
+  produced_at: string | null
+  expires_at: string | null
+  notes: string | null
+  is_sold_out: boolean
+  sold_out_at: string | null
+  days_until_expiry: number | null
+  expiry_level: BatchExpiryLevel | null
+  created_at: string
+}
+
+export interface ExpiringBatchData {
+  batch: BatchData
+  product_name: string
+  product_sku: string
+}
+
+export interface CreateBatchRequest {
+  product_id: number
+  lot_number?: string
+  supplier?: string
+  inbound_at?: string
+  produced_at?: string
+  expires_at?: string
+  notes?: string
+}
+
+export interface UpdateBatchRequest {
+  lot_number?: string
+  supplier?: string | null
+  produced_at?: string | null
+  expires_at?: string | null
+  notes?: string
 }

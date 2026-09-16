@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, reactive, ref } from 'vue'
 
 import { outboundApi } from '@/api/inventory'
 import { scanProductApi } from '@/api/products'
@@ -11,11 +11,6 @@ import type {
   OutboundResponseData,
   StockInsufficientErrorData,
 } from '@/types/api'
-import {
-  readStoredScanMode,
-  resolveScanPreferenceScope,
-  writeStoredScanMode,
-} from '@/utils/sessionStorage'
 
 interface OutboundFormItem {
   local_id: number
@@ -27,9 +22,6 @@ interface OutboundFormItem {
   editable: boolean
 }
 
-type OutboundScanMode = 'scan_confirm' | 'continuous_scan'
-const OUTBOUND_SCAN_MODES: OutboundScanMode[] = ['scan_confirm', 'continuous_scan']
-
 const loading = ref(false)
 const scanLoading = ref(false)
 const errorText = ref('')
@@ -39,8 +31,6 @@ const scanSuccessText = ref('')
 const result = ref<OutboundResponseData | null>(null)
 
 const authStore = useAuthStore()
-const scanBarcodeInputRef = ref<HTMLInputElement | null>(null)
-const scanConfirmQtyInputRef = ref<HTMLInputElement | null>(null)
 
 let itemSeed = 1
 
@@ -68,24 +58,12 @@ const scanForm = reactive({
   sell_price: '',
 })
 
-const scanMode = ref<OutboundScanMode>('scan_confirm')
 const orderHeaderExpanded = ref(false)
 const orderAdvancedExpanded = ref(false)
-const scanConfirmSessionActive = ref(false)
-const scanConfirmProcessedCount = ref(0)
 const continuousSessionActive = ref(false)
 const continuousProcessedCount = ref(0)
 const continuousLastBarcode = ref('')
 const continuousLastAt = ref(0)
-
-const scanConfirmForm = reactive({
-  visible: false,
-  product_id: '',
-  product_name: '',
-  qty: '1',
-  sell_price: '',
-  expected_version: '',
-})
 
 const canSubmit = computed(() => {
   const role = authStore.session?.user.role
@@ -133,86 +111,15 @@ function formatApiError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-function resolveOutboundStoredMode(storedMode: string | null): OutboundScanMode | null {
-  if (!storedMode) {
-    return null
-  }
-
-  if (storedMode === 'quick_accumulate') {
-    return 'continuous_scan'
-  }
-
-  if (OUTBOUND_SCAN_MODES.includes(storedMode as OutboundScanMode)) {
-    return storedMode as OutboundScanMode
-  }
-
-  return null
-}
-
 function resetScanForm(): void {
   scanForm.barcode = ''
   scanForm.sell_price = ''
-  scanConfirmSessionActive.value = false
-  scanConfirmProcessedCount.value = 0
   continuousSessionActive.value = false
   continuousProcessedCount.value = 0
   continuousLastBarcode.value = ''
   continuousLastAt.value = 0
-  scanConfirmForm.visible = false
-  scanConfirmForm.product_id = ''
-  scanConfirmForm.product_name = ''
-  scanConfirmForm.qty = '1'
-  scanConfirmForm.sell_price = ''
-  scanConfirmForm.expected_version = ''
   scanErrorText.value = ''
   scanSuccessText.value = ''
-}
-
-function clearScanConfirmDraft(): void {
-  scanConfirmForm.visible = false
-  scanConfirmForm.product_id = ''
-  scanConfirmForm.product_name = ''
-  scanConfirmForm.qty = '1'
-  scanConfirmForm.sell_price = ''
-  scanConfirmForm.expected_version = ''
-}
-
-function openScanConfirmDialog(payload: {
-  product_id: string
-  product_name: string
-  sell_price: string
-}): void {
-  scanConfirmSessionActive.value = true
-  scanConfirmForm.visible = true
-  scanConfirmForm.product_id = payload.product_id
-  scanConfirmForm.product_name = payload.product_name
-  scanConfirmForm.qty = '1'
-  scanConfirmForm.sell_price = payload.sell_price
-  scanConfirmForm.expected_version = ''
-  scanSuccessText.value = `扫码成功：#${payload.product_id} ${payload.product_name}，请确认后写入明细`
-
-  nextTick(() => {
-    const input = scanConfirmQtyInputRef.value
-    input?.focus()
-    input?.select()
-  })
-}
-
-function cancelScanConfirmDialog(): void {
-  clearScanConfirmDraft()
-  scanForm.barcode = ''
-
-  if (scanMode.value === 'scan_confirm') {
-    scanConfirmSessionActive.value = true
-    scanSuccessText.value = '已取消本次确认，可继续扫码'
-    focusScanBarcodeInput()
-  }
-}
-
-function focusScanBarcodeInput(): void {
-  nextTick(() => {
-    scanBarcodeInputRef.value?.focus()
-  })
 }
 
 function playContinuousSuccessVoice(): void {
@@ -294,46 +201,6 @@ function mergeScannedItem(payload: {
   scanSuccessText.value = `扫码成功：#${payload.product_id} ${payload.product_name}，已新增出库明细（数量=${payload.qty}）`
 }
 
-function applyScanConfirm(): void {
-  const qty = Number(scanConfirmForm.qty.trim())
-  if (!Number.isInteger(qty) || qty <= 0) {
-    scanErrorText.value = '确认区“数量”必须为正整数'
-    return
-  }
-
-  const sellPrice = scanConfirmForm.sell_price.trim()
-  if (!/^\d+(\.\d{1,4})?$/.test(sellPrice)) {
-    scanErrorText.value = '确认区“销售单价”格式错误（示例：3.50）'
-    return
-  }
-
-  if (scanConfirmForm.expected_version.trim()) {
-    const expectedVersion = Number(scanConfirmForm.expected_version.trim())
-    if (!Number.isInteger(expectedVersion) || expectedVersion < 0) {
-      scanErrorText.value = '确认区“版本”必须为大于等于 0 的整数'
-      return
-    }
-  }
-
-  mergeScannedItem({
-    product_id: scanConfirmForm.product_id,
-    product_name: scanConfirmForm.product_name,
-    qty,
-    sell_price: sellPrice,
-    expected_version: scanConfirmForm.expected_version,
-  })
-  scanConfirmForm.visible = false
-  clearScanConfirmDraft()
-  scanForm.barcode = ''
-
-  if (scanMode.value === 'scan_confirm') {
-    scanConfirmSessionActive.value = true
-    scanConfirmProcessedCount.value += 1
-    scanSuccessText.value = `确认写入成功，确认续扫会话进行中（已处理 ${scanConfirmProcessedCount.value} 条）`
-    focusScanBarcodeInput()
-  }
-}
-
 async function scanAndAccumulate(options?: { forceQuickAccumulate?: boolean; fromContinuousSession?: boolean }): Promise<void> {
   if (loading.value || scanLoading.value) {
     return
@@ -370,15 +237,6 @@ async function scanAndAccumulate(options?: { forceQuickAccumulate?: boolean; fro
     const scannedProductId = String(response.data.id)
     const sellPrice = customSellPrice || response.data.retail_price
 
-    if (scanMode.value === 'scan_confirm' && !options?.forceQuickAccumulate) {
-      openScanConfirmDialog({
-        product_id: scannedProductId,
-        product_name: response.data.name,
-        sell_price: sellPrice,
-      })
-      return
-    }
-
     mergeScannedItem({
       product_id: scannedProductId,
       product_name: response.data.name,
@@ -412,65 +270,22 @@ function startContinuousScanSession(): void {
   continuousLastAt.value = 0
 }
 
-function stopScanConfirmSession(): void {
-  scanConfirmSessionActive.value = false
-  scanSuccessText.value = `确认续扫会话已结束，本次共处理 ${scanConfirmProcessedCount.value} 条`
-}
-
 function stopContinuousScanSession(): void {
   continuousSessionActive.value = false
   scanSuccessText.value = `连续扫码会话已结束，本次共处理 ${continuousProcessedCount.value} 条`
 }
 
 async function scanByCurrentMode(): Promise<void> {
-  if (scanMode.value === 'continuous_scan') {
-    if (!continuousSessionActive.value) {
-      startContinuousScanSession()
-      return
-    }
-
-    await scanAndAccumulate({
-      forceQuickAccumulate: true,
-      fromContinuousSession: true,
-    })
+  if (!continuousSessionActive.value) {
+    startContinuousScanSession()
     return
   }
 
-  await scanAndAccumulate()
+  await scanAndAccumulate({
+    forceQuickAccumulate: true,
+    fromContinuousSession: true,
+  })
 }
-
-onMounted(() => {
-  const scope = resolveScanPreferenceScope(authStore.session)
-  if (!scope) {
-    return
-  }
-
-  const storedMode = readStoredScanMode(scope, 'outbound')
-  const resolvedMode = resolveOutboundStoredMode(storedMode)
-  if (resolvedMode) {
-    scanMode.value = resolvedMode
-
-    if (storedMode !== resolvedMode) {
-      writeStoredScanMode(scope, 'outbound', resolvedMode)
-    }
-  }
-})
-
-watch(scanMode, (value) => {
-  if (value !== 'scan_confirm') {
-    scanConfirmSessionActive.value = false
-    scanConfirmProcessedCount.value = 0
-  }
-
-  if (value !== 'continuous_scan') {
-    continuousSessionActive.value = false
-  }
-
-  const scope = resolveScanPreferenceScope(authStore.session)
-  if (scope) {
-    writeStoredScanMode(scope, 'outbound', value)
-  }
-})
 
 function addItem(): void {
   form.items.push(createFormItem())
@@ -638,37 +453,12 @@ async function submit(): Promise<void> {
     <p v-if="!canSubmit" class="warn-text">当前角色无销售出库权限，仅 OWNER/SALES 可操作。</p>
 
     <div class="card-panel form-grid" style="margin-bottom: 12px">
-      <h3>条码出库（模式化）</h3>
+      <h3>条码出库（自动模式）</h3>
 
       <form class="form-inline" @submit.prevent="scanByCurrentMode">
-        <div class="form-label inline">
-          <span>扫码模式</span>
-          <div class="scan-mode-tabs" role="tablist" aria-label="扫码模式">
-            <button
-              class="scan-mode-tab"
-              :class="{ 'is-active': scanMode === 'scan_confirm' }"
-              type="button"
-              :disabled="loading || scanLoading"
-              @click="scanMode = 'scan_confirm'"
-            >
-              确认写入
-            </button>
-            <button
-              class="scan-mode-tab"
-              :class="{ 'is-active': scanMode === 'continuous_scan' }"
-              type="button"
-              :disabled="loading || scanLoading"
-              @click="scanMode = 'continuous_scan'"
-            >
-              连续扫码
-            </button>
-          </div>
-        </div>
-
         <label class="form-label inline">
           <span>条码</span>
           <input
-            ref="scanBarcodeInputRef"
             v-model="scanForm.barcode"
             :disabled="loading || scanLoading"
             placeholder="扫码枪回车，例如：690123456789"
@@ -689,11 +479,9 @@ async function submit(): Promise<void> {
             <svg viewBox="0 0 24 24"><path d="M4 7h16v10H4z" /><path d="M12 7V5M12 19v-5" /></svg>
           </span>
           {{
-            scanMode === 'continuous_scan'
-              ? continuousSessionActive
-                ? (scanLoading ? '识别中...' : '处理当前条码并累加')
-                : '开始连续扫码会话'
-              : (scanLoading ? '识别中...' : '按条码加入明细')
+            continuousSessionActive
+              ? (scanLoading ? '识别中...' : '处理当前条码并累加')
+              : '开始扫码会话'
           }}
         </button>
         <button class="btn btn-secondary" type="button" :disabled="loading || scanLoading" @click="resetScanForm">
@@ -703,16 +491,7 @@ async function submit(): Promise<void> {
           清空
         </button>
         <button
-          v-if="scanMode === 'scan_confirm' && scanConfirmSessionActive"
-          class="btn btn-secondary"
-          type="button"
-          :disabled="loading || scanLoading"
-          @click="stopScanConfirmSession"
-        >
-          结束确认续扫
-        </button>
-        <button
-          v-if="scanMode === 'continuous_scan' && continuousSessionActive"
+          v-if="continuousSessionActive"
           class="btn btn-secondary"
           type="button"
           :disabled="loading || scanLoading"
@@ -723,62 +502,9 @@ async function submit(): Promise<void> {
       </form>
 
       <p class="table-summary">命中商品后自动填充出库明细；重复扫码同一商品自动累加数量。</p>
-      <p v-if="scanMode === 'continuous_scan'" class="table-summary">
-        连续扫码会话：{{ continuousSessionActive ? '进行中' : '未开始' }}，已处理 {{ continuousProcessedCount }} 条。
-      </p>
-      <p v-if="scanMode === 'scan_confirm'" class="table-summary">
-        确认续扫会话：{{ scanConfirmSessionActive ? '进行中' : '未开始' }}，已处理 {{ scanConfirmProcessedCount }} 条。
-      </p>
+      <p class="table-summary">扫码会话：{{ continuousSessionActive ? '进行中' : '未开始' }}，已处理 {{ continuousProcessedCount }} 条。</p>
       <p v-if="scanErrorText" class="error-text">{{ scanErrorText }}</p>
       <p v-if="scanSuccessText" class="success-text">{{ scanSuccessText }}</p>
-    </div>
-
-    <div
-      v-if="scanConfirmForm.visible"
-      class="modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="outbound-scan-confirm-title"
-      @click.self="cancelScanConfirmDialog"
-    >
-      <div class="modal-card" @keydown.esc.prevent="cancelScanConfirmDialog">
-        <h3 id="outbound-scan-confirm-title">确认写入</h3>
-        <p class="table-summary">已命中商品：#{{ scanConfirmForm.product_id }} {{ scanConfirmForm.product_name }}</p>
-        <div class="form-inline form-inline-compact">
-          <label class="form-label inline">
-            <span>数量 *</span>
-            <input
-              ref="scanConfirmQtyInputRef"
-              v-model="scanConfirmForm.qty"
-              :disabled="loading || scanLoading"
-              placeholder="1"
-              @keydown.enter.prevent="applyScanConfirm"
-              @keydown.esc.prevent="cancelScanConfirmDialog"
-            />
-          </label>
-          <label class="form-label inline">
-            <span>销售单价 *</span>
-            <input
-              v-model="scanConfirmForm.sell_price"
-              :disabled="loading || scanLoading"
-              placeholder="3.50"
-              @keydown.enter.prevent="applyScanConfirm"
-              @keydown.esc.prevent="cancelScanConfirmDialog"
-            />
-          </label>
-        </div>
-        <div class="form-actions">
-          <button class="btn" type="button" :disabled="loading || scanLoading" @click="applyScanConfirm">
-            <span class="btn-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10" /></svg>
-            </span>
-            确认写入（Enter）
-          </button>
-          <button class="btn btn-secondary" type="button" :disabled="loading || scanLoading" @click="cancelScanConfirmDialog">
-            取消（Esc）
-          </button>
-        </div>
-      </div>
     </div>
 
     <form class="form-grid outbound-form" @submit.prevent="submit">

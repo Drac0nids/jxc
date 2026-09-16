@@ -17,36 +17,73 @@ interface NavItem {
   roles?: string[]
 }
 
-const navItems: NavItem[] = [
-  { to: '/dashboard', label: '经营看板', iconClass: 'dashboard' },
-  { to: '/users', label: '员工管理', iconClass: 'users', roles: ['OWNER'] },
-  { to: '/products', label: '商品列表', iconClass: 'products' },
-  { to: '/inbound', label: '采购入库', iconClass: 'inbound', roles: ['OWNER', 'PURCHASER'] },
-  { to: '/purchase-orders', label: '采购单状态流', iconClass: 'purchase', roles: ['OWNER', 'PURCHASER'] },
-  { to: '/stock-checks', label: '库存盘点状态流', iconClass: 'checks', roles: ['OWNER', 'PURCHASER'] },
-  { to: '/sales-orders', label: '销售单状态流', iconClass: 'sales', roles: ['OWNER', 'SALES'] },
-  { to: '/outbound', label: '销售出库', iconClass: 'outbound', roles: ['OWNER', 'SALES'] },
-  { to: '/sales-report', label: '销售报表', iconClass: 'report' },
-  { to: '/low-stock', label: '低库存预警', iconClass: 'lowstock', roles: ['OWNER', 'PURCHASER'] },
-  { to: '/stock-logs', label: '库存流水', iconClass: 'logs', roles: ['OWNER', 'PURCHASER'] },
-  { to: '/audit-logs', label: '审计日志', iconClass: 'audit', roles: ['OWNER'] },
+interface NavGroup {
+  title: string
+  items: NavItem[]
+}
+
+const navGroups: NavGroup[] = [
+  {
+    title: '经营分析',
+    items: [
+      { to: '/dashboard', label: '经营看板', iconClass: 'dashboard' },
+      { to: '/trend', label: '趋势分析', iconClass: 'trend' },
+      { to: '/sales-report', label: '销售报表', iconClass: 'report' },
+    ]
+  },
+  {
+    title: '资料管理',
+    items: [
+      { to: '/products', label: '商品列表', iconClass: 'products' },
+      { to: '/categories', label: '分类管理', iconClass: 'categories', roles: ['OWNER', 'PURCHASER'] },
+      { to: '/suppliers', label: '供应商', iconClass: 'suppliers', roles: ['OWNER', 'PURCHASER'] },
+    ]
+  },
+  {
+    title: '库存业务',
+    items: [
+      { to: '/inbound', label: '采购入库', iconClass: 'inbound', roles: ['OWNER', 'PURCHASER'] },
+      { to: '/purchase-orders', label: '采购单库', iconClass: 'purchase', roles: ['OWNER', 'PURCHASER'] },
+      { to: '/stock-checks', label: '库存盘点', iconClass: 'checks', roles: ['OWNER', 'PURCHASER'] },
+      { to: '/batches', label: '批次跟踪', iconClass: 'batches', roles: ['OWNER', 'PURCHASER'] },
+      { to: '/serials', label: '序列号追踪', iconClass: 'serials' },
+    ]
+  },
+  {
+    title: '销售业务',
+    items: [
+      { to: '/outbound', label: '扫码出库', iconClass: 'outbound', roles: ['OWNER', 'SALES'] },
+      { to: '/sales-orders', label: '销售单库', iconClass: 'sales', roles: ['OWNER', 'SALES'] },
+    ]
+  },
+  {
+    title: '预警与审计',
+    items: [
+      { to: '/expiring-batches', label: '过期预警', iconClass: 'expiry', roles: ['OWNER', 'PURCHASER'] },
+      { to: '/low-stock', label: '低库存预警', iconClass: 'lowstock', roles: ['OWNER', 'PURCHASER'] },
+      { to: '/inbound-logs', label: '入库日志', iconClass: 'logs', roles: ['OWNER', 'PURCHASER'] },
+      { to: '/stock-check-logs', label: '盘点日志', iconClass: 'checklogs', roles: ['OWNER', 'PURCHASER'] },
+      { to: '/stock-logs', label: '库存流水', iconClass: 'logs', roles: ['OWNER', 'PURCHASER'] },
+      { to: '/audit-logs', label: '审计日志', iconClass: 'audit', roles: ['OWNER'] },
+      { to: '/users', label: '员工管理', iconClass: 'users', roles: ['OWNER'] },
+    ]
+  }
 ]
 
 const userLabel = computed(() => authStore.session?.user.name ?? '-')
 const roleLabel = computed(() => authStore.session?.user.role ?? '-')
 const isLoggingOut = ref(false)
 
-const visibleNavItems = computed(() => {
+const visibleNavGroups = computed(() => {
   const role = authStore.session?.user.role
-  return navItems.filter((item) => {
-    if (!item.roles || item.roles.length === 0) {
-      return true
-    }
-    if (!role) {
-      return false
-    }
-    return item.roles.includes(role)
-  })
+  return navGroups.map(group => ({
+    ...group,
+    items: group.items.filter(item => {
+      if (!item.roles || item.roles.length === 0) return true
+      if (!role) return false
+      return item.roles.includes(role)
+    })
+  })).filter(group => group.items.length > 0)
 })
 
 function isActive(path: string): boolean {
@@ -83,16 +120,19 @@ async function logout(): Promise<void> {
       <p class="layout-subtitle">Windows 客户端 MVP</p>
 
       <nav class="layout-nav">
-        <RouterLink
-          v-for="item in visibleNavItems"
-          :key="item.to"
-          :to="item.to"
-          class="layout-nav-link"
-          :class="{ 'is-active': isActive(item.to) }"
-        >
-          <span class="nav-icon" :class="`nav-icon-${item.iconClass}`" aria-hidden="true" />
-          {{ item.label }}
-        </RouterLink>
+        <div v-for="group in visibleNavGroups" :key="group.title" class="nav-group">
+          <p class="nav-group-title">{{ group.title }}</p>
+          <RouterLink
+            v-for="item in group.items"
+            :key="item.to"
+            :to="item.to"
+            class="layout-nav-link"
+            :class="{ 'is-active': isActive(item.to) }"
+          >
+            <span class="nav-icon" :class="`nav-icon-${item.iconClass}`" aria-hidden="true" />
+            <span class="nav-label">{{ item.label }}</span>
+          </RouterLink>
+        </div>
       </nav>
     </aside>
 

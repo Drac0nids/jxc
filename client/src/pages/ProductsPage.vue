@@ -85,6 +85,8 @@ const createForm = reactive({
   init_stock: '0',
   min_stock_limit: '0',
   cost_price: '',
+  track_batches: false,
+  track_serials: false,
 })
 
 const editForm = reactive({
@@ -95,11 +97,38 @@ const editForm = reactive({
   retail_price: '',
   min_stock_limit: '0',
   expected_version: '',
+  track_batches: false,
+  track_serials: false,
 })
 const editingProductId = ref<number | null>(null)
 
 const products = ref<ProductData[]>([])
 const total = ref(0)
+
+// ── Detail modal ─────────────────────────────────────────────────────────────
+const detailProduct = ref<ProductData | null>(null)
+
+function openDetail(p: ProductData) { detailProduct.value = p }
+function closeDetail() { detailProduct.value = null }
+
+function stockProgress(p: ProductData): number {
+  if (!p.min_stock_limit || p.min_stock_limit === 0) return 1
+  return Math.min(1, p.current_stock / (p.min_stock_limit * 2))
+}
+
+function stockColor(p: ProductData): string {
+  const prog = stockProgress(p)
+  if (prog < 0.3) return '#ff6f61'
+  if (prog < 0.6) return '#f59e0b'
+  return '#10b981'
+}
+
+function grossMargin(p: ProductData): string | null {
+  const cost = parseFloat(p.cost_price ?? '')
+  const retail = parseFloat(p.retail_price)
+  if (!cost || !retail || retail <= 0) return null
+  return ((retail - cost) / retail * 100).toFixed(1) + '%'
+}
 
 function firstQueryValue(value: unknown): string {
   if (typeof value === 'string') {
@@ -283,6 +312,8 @@ function resetCreateFormInternal(shouldClearMessage: boolean): void {
   createForm.init_stock = '0'
   createForm.min_stock_limit = '0'
   createForm.cost_price = ''
+  createForm.track_batches = false
+  createForm.track_serials = false
 
   if (shouldClearMessage) {
     createErrorText.value = ''
@@ -353,22 +384,18 @@ function buildCreatePayload(): CreateProductRequest {
     unit: createForm.unit.trim(),
     retail_price: createForm.retail_price.trim(),
     cost_price: createForm.cost_price.trim(),
+    track_batches: createForm.track_batches,
+    track_serials: createForm.track_serials,
   }
 
   const sku = createForm.sku.trim()
-  if (sku) {
-    payload.sku = sku
-  }
+  if (sku) { payload.sku = sku }
 
   const initStockRaw = createForm.init_stock.trim()
-  if (initStockRaw) {
-    payload.init_stock = Number(initStockRaw)
-  }
+  if (initStockRaw) { payload.init_stock = Number(initStockRaw) }
 
   const minStockLimitRaw = createForm.min_stock_limit.trim()
-  if (minStockLimitRaw) {
-    payload.min_stock_limit = Number(minStockLimitRaw)
-  }
+  if (minStockLimitRaw) { payload.min_stock_limit = Number(minStockLimitRaw) }
 
   return payload
 }
@@ -381,6 +408,8 @@ function fillEditFormByProduct(product: ProductData): void {
   editForm.retail_price = product.retail_price
   editForm.min_stock_limit = String(product.min_stock_limit)
   editForm.expected_version = String(product.version)
+  editForm.track_batches = product.track_batches ?? false
+  editForm.track_serials = product.track_serials ?? false
 }
 
 function resetEditFormInternal(shouldClearMessage: boolean): void {
@@ -391,6 +420,8 @@ function resetEditFormInternal(shouldClearMessage: boolean): void {
   editForm.retail_price = ''
   editForm.min_stock_limit = '0'
   editForm.expected_version = ''
+  editForm.track_batches = false
+  editForm.track_serials = false
 
   if (shouldClearMessage) {
     editErrorText.value = ''
@@ -491,6 +522,8 @@ function buildUpdatePayload(): UpdateProductRequest {
     retail_price: editForm.retail_price.trim(),
     min_stock_limit: Number(editForm.min_stock_limit.trim()),
     expected_version: Number(editForm.expected_version.trim()),
+    track_batches: editForm.track_batches,
+    track_serials: editForm.track_serials,
   }
 }
 
@@ -731,7 +764,17 @@ onMounted(() => {
           <span>预警阈值</span>
           <input v-model="createForm.min_stock_limit" :disabled="createBusy" placeholder="默认 0" />
         </label>
+      </div>
 
+      <div class="form-inline form-inline-compact" style="align-items:center;gap:20px">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" v-model="createForm.track_batches" :disabled="createBusy" />
+          <span>启用批次追踪</span>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+          <input type="checkbox" v-model="createForm.track_serials" :disabled="createBusy" />
+          <span>启用序列号追踪</span>
+        </label>
       </div>
 
       <div class="form-actions">
@@ -798,6 +841,17 @@ onMounted(() => {
           <label class="form-label inline">
             <span>expected_version *</span>
             <input v-model="editForm.expected_version" :disabled="editBusy" />
+          </label>
+        </div>
+
+        <div class="form-inline form-inline-compact" style="align-items:center;gap:20px">
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+            <input type="checkbox" v-model="editForm.track_batches" :disabled="editBusy" />
+            <span>批次追踪</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:13px">
+            <input type="checkbox" v-model="editForm.track_serials" :disabled="editBusy" />
+            <span>序列号追踪</span>
           </label>
         </div>
 
@@ -878,31 +932,27 @@ onMounted(() => {
               <td>{{ item.min_stock_limit }}</td>
               <td>{{ item.version }}</td>
               <td>
-                <div v-if="canCreate" class="form-actions">
-                  <button
-                    class="btn btn-secondary"
-                    type="button"
-                    :disabled="rowActionBusy"
-                    @click="startEditProduct(item)"
-                  >
-                    <span class="btn-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24"><path d="M4 20h4l10-10-4-4L4 16v4z" /><path d="m12 6 4 4" /></svg>
-                    </span>
-                    {{ editingProductId === item.id ? '编辑中' : '编辑' }}
-                  </button>
-                  <button
-                    class="btn btn-danger"
-                    type="button"
-                    :disabled="rowActionBusy"
-                    @click="submitDeleteProduct(item)"
-                  >
-                    <span class="btn-icon" aria-hidden="true">
-                      <svg viewBox="0 0 24 24"><path d="M4 7h16" /><path d="M9 7V5h6v2" /><path d="M8 7v12m8-12v12M6 7l1 12h10l1-12" /></svg>
-                    </span>
-                    {{ deleteLoadingId === item.id ? '删除中...' : '删除' }}
-                  </button>
+                <div class="form-inline form-inline-compact">
+                  <button class="btn btn-secondary" type="button" @click="openDetail(item)">详情</button>
+                  <template v-if="canCreate">
+                    <button
+                      class="btn btn-secondary"
+                      type="button"
+                      :disabled="rowActionBusy"
+                      @click="startEditProduct(item)"
+                    >
+                      {{ editingProductId === item.id ? '编辑中' : '编辑' }}
+                    </button>
+                    <button
+                      class="btn btn-danger"
+                      type="button"
+                      :disabled="rowActionBusy"
+                      @click="submitDeleteProduct(item)"
+                    >
+                      {{ deleteLoadingId === item.id ? '删除中...' : '删除' }}
+                    </button>
+                  </template>
                 </div>
-                <span v-else class="table-summary">只读</span>
               </td>
             </tr>
             <tr v-if="!listLoading && products.length === 0">
@@ -926,4 +976,100 @@ onMounted(() => {
       </div>
     </div>
   </section>
+
+  <!-- ── 商品详情 Modal ─────────────────────────────────────────────────────── -->
+  <Teleport to="body">
+    <div v-if="detailProduct" class="modal-backdrop" @click.self="closeDetail">
+      <div class="modal-card detail-modal">
+        <!-- Header -->
+        <div class="detail-modal-header">
+          <div>
+            <h3 style="font-size:18px;font-weight:800;margin:0">{{ detailProduct.name }}</h3>
+            <p style="font-size:12px;color:#9aa5ba;margin:4px 0 0">SKU: {{ detailProduct.sku || '—' }} &nbsp;·&nbsp; ID #{{ detailProduct.id }}</p>
+          </div>
+          <button class="btn btn-secondary" style="padding:6px 12px" @click="closeDetail">关闭</button>
+        </div>
+
+        <!-- 库存进度 -->
+        <div class="detail-section">
+          <p class="detail-section-title">📦 库存状态</p>
+          <div class="stock-progress-bar">
+            <div class="stock-progress-fill"
+              :style="{ width: (stockProgress(detailProduct) * 100).toFixed(0) + '%', background: stockColor(detailProduct) }" />
+          </div>
+          <div class="detail-stat-row">
+            <div class="detail-stat">
+              <span class="detail-stat-label">当前库存</span>
+              <span class="detail-stat-value" :style="{ color: stockColor(detailProduct) }">
+                {{ detailProduct.current_stock }} <small>{{ detailProduct.unit }}</small>
+              </span>
+            </div>
+            <div class="detail-stat">
+              <span class="detail-stat-label">预警阈值</span>
+              <span class="detail-stat-value">{{ detailProduct.min_stock_limit }} <small>{{ detailProduct.unit }}</small></span>
+            </div>
+            <div v-if="detailProduct.current_stock < detailProduct.min_stock_limit" class="detail-stat">
+              <span class="detail-stat-label">缺货数量</span>
+              <span class="detail-stat-value" style="color:#ff6f61">
+                {{ detailProduct.min_stock_limit - detailProduct.current_stock }} <small>{{ detailProduct.unit }}</small>
+              </span>
+            </div>
+          </div>
+        </div>
+
+        <!-- 价格信息 (按角色隐藏成本) -->
+        <div v-if="canViewCostPrice" class="detail-section">
+          <p class="detail-section-title">💰 价格信息</p>
+          <div class="detail-stat-row">
+            <div class="detail-stat">
+              <span class="detail-stat-label">零售价</span>
+              <span class="detail-stat-value" style="color:#10b981">¥{{ detailProduct.retail_price }}</span>
+            </div>
+            <div class="detail-stat">
+              <span class="detail-stat-label">成本价</span>
+              <span class="detail-stat-value">{{ detailProduct.cost_price ? '¥' + detailProduct.cost_price : '—' }}</span>
+            </div>
+            <div class="detail-stat">
+              <span class="detail-stat-label">毛利率</span>
+              <span class="detail-stat-value" style="color:#8b5cf6">{{ grossMargin(detailProduct) ?? '—' }}</span>
+            </div>
+          </div>
+          <p v-if="detailProduct.last_inbound_unit_cost" style="font-size:12px;color:#9aa5ba;margin-top:8px">
+            最近入库单价：¥{{ detailProduct.last_inbound_unit_cost }}
+          </p>
+        </div>
+
+        <!-- 基本信息 -->
+        <div class="detail-section">
+          <p class="detail-section-title">ℹ️ 基本信息</p>
+          <table class="detail-info-table">
+            <tbody>
+              <tr><td>条码</td><td><code>{{ detailProduct.barcode || '—' }}</code></td></tr>
+              <tr><td>SKU</td><td>{{ detailProduct.sku || '—' }}</td></tr>
+              <tr><td>单位</td><td>{{ detailProduct.unit }}</td></tr>
+              <tr><td>版本</td><td>{{ detailProduct.version }}</td></tr>
+            </tbody>
+          </table>
+          <!-- 功能标记 -->
+          <div style="display:flex;gap:8px;margin-top:10px;flex-wrap:wrap">
+            <span class="feature-chip" :class="detailProduct.track_batches ? 'chip-on' : 'chip-off'">
+              批次追踪 {{ detailProduct.track_batches ? '✓' : '✗' }}
+            </span>
+            <span class="feature-chip" :class="detailProduct.track_serials ? 'chip-on' : 'chip-off'">
+              序列号追踪 {{ detailProduct.track_serials ? '✓' : '✗' }}
+            </span>
+          </div>
+        </div>
+
+        <!-- 快捷操作 -->
+        <div v-if="canCreate" class="detail-section">
+          <p class="detail-section-title">⚡ 快捷操作</p>
+          <div class="form-inline form-inline-compact">
+            <button class="btn btn-secondary" @click="startEditProduct(detailProduct); closeDetail()">编辑商品信息</button>
+            <button class="btn btn-danger" @click="submitDeleteProduct(detailProduct); closeDetail()">删除商品</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "jxc-client",
+  "productName": "极速云进销存",
   "version": "0.1.0",
   "identifier": "com.hyperjxc.client",
   "build": {
@@ -13,8 +13,8 @@
     "windows": [
       {
         "title": "极速云进销存",
-        "width": 800,
-        "height": 600,
+        "width": 1280,
+        "height": 800,
         "resizable": true,
         "fullscreen": false
       }
@@ -32,6 +32,9 @@
       "icons/128x128@2x.png",
       "icons/icon.icns",
       "icons/icon.ico"
+    ],
+    "externalBin": [
+      "binaries/server"
     ]
   }
 }

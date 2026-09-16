@@ -43,6 +43,7 @@ function parseDateValue(raw: string): { normalized: string } | { error: string }
 
 const loading = ref(false)
 const errorText = ref('')
+const lastUpdatedText = ref('')
 const dashboard = ref<DashboardData | null>(null)
 const animated = reactive({
   sales: 0,
@@ -154,6 +155,7 @@ async function fetchDashboard(): Promise<void> {
       date,
     })
     dashboard.value = response.data
+    lastUpdatedText.value = new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit', second: '2-digit' })
   } catch (error) {
     if (error instanceof ApiClientError) {
       errorText.value = `${error.message}（code=${error.code}${error.requestId ? `, request_id=${error.requestId}` : ''}）`
@@ -220,7 +222,13 @@ onBeforeUnmount(() => {
 
 <template>
   <section>
-    <h2>经营看板</h2>
+    <div class="card-panel-header" style="margin-bottom: 20px">
+      <h2>经营看板</h2>
+      <div v-if="lastUpdatedText" class="live-indicator">
+        <span class="live-dot" />
+        <span>数据已同步于 {{ lastUpdatedText }}</span>
+      </div>
+    </div>
     <p v-if="!canViewGrossProfit" class="warn-text">当前角色为 SALES，已隐藏毛利指标。</p>
 
     <form class="form-inline" @submit.prevent="fetchDashboard">

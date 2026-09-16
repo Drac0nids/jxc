@@ -5,6 +5,7 @@ import axios, {
   type AxiosResponse,
   type InternalAxiosRequestConfig,
 } from 'axios'
+import { invoke } from '@tauri-apps/api/core'
 
 import type { ApiErrorPayload, ApiResponse, RefreshTokenResponseData } from '@/types/api'
 import { useAuthStore } from '@/stores/auth'
@@ -12,7 +13,68 @@ import { pinia } from '@/stores/pinia'
 
 const DEFAULT_API_BASE_URL = 'http://1.14.45.242:8080/api/v1'
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/+$/, '')
+// ── Tauri / local-mode detection ─────────────────────────────────────────────
+
+/** True when running inside a Tauri window (local offline mode) */
+function isTauri(): boolean {
+  return typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
+}
+
+function looksLikeTauriRuntime(): boolean {
+  if (typeof window === 'undefined') {
+    return false
+  }
+
+  if (isTauri()) {
+    return true
+  }
+
+  const host = window.location.hostname
+  const protocol = window.location.protocol
+  return protocol === 'tauri:' || host === 'tauri.localhost' || host.endsWith('.localhost')
+}
+
+let _resolvedBaseUrl: string | null = null
+let _resolvePromise: Promise<string> | null = null
+
+/**
+ * Resolve the API base URL once.
+ * - Tauri mode : ask the Rust side for the dynamic port
+ * - Web mode   : use VITE_API_BASE_URL env var (falls back to hard-coded remote)
+ */
+async function resolveApiBaseUrl(): Promise<string> {
+  if (_resolvedBaseUrl) return _resolvedBaseUrl
+  if (_resolvePromise) return _resolvePromise
+
+  const fallback = (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/+$/, '')
+  const preferLocal = looksLikeTauriRuntime()
+
+  _resolvePromise = (async (): Promise<string> => {
+    if (preferLocal) {
+      try {
+        const port = (await invoke('get_server_port')) as number
+        const url = `http://127.0.0.1:${port}/api/v1`
+        _resolvedBaseUrl = url
+        return url
+      } catch (e) {
+        console.error('[http] failed to get server port from Tauri', e)
+        // Keep it retryable in Tauri runtime; avoid permanently pinning to remote.
+        _resolvePromise = null
+        return fallback
+      }
+    }
+
+    _resolvedBaseUrl = fallback
+    return fallback
+  })()
+
+  return _resolvePromise
+}
+
+// Bootstrap the URL resolution immediately so it's ready before the first request
+resolveApiBaseUrl()
+
+const API_BASE_URL_SYNC = (import.meta.env.VITE_API_BASE_URL ?? DEFAULT_API_BASE_URL).replace(/\/+$/, '')
 
 const X_REQUEST_ID_HEADER = 'x-request-id'
 const X_IDEMPOTENCY_KEY_HEADER = 'x-idempotency-key'
@@ -99,7 +161,7 @@ async function refreshAccessToken(): Promise<boolean> {
   try {
     const response = await axios.request<ApiResponse<RefreshTokenResponseData>>({
       method: 'post',
-      baseURL: API_BASE_URL,
+      baseURL: await resolveApiBaseUrl(),
       url: '/auth/refresh',
       data: {
         refresh_token: session.refreshToken,
@@ -208,12 +270,21 @@ function normalizeApiError(error: unknown): ApiClientError {
   })
 }
 
+// Axios instance — starts with a best-effort sync URL; updated dynamically once port resolves
 export const http = axios.create({
-  baseURL: API_BASE_URL,
+  baseURL: API_BASE_URL_SYNC,
   timeout: 15_000,
 })
 
-http.interceptors.request.use((config) => enrichRequestHeaders(config))
+// Once the port is known, patch the baseURL so all subsequent requests go to it
+resolveApiBaseUrl().then((url) => {
+  http.defaults.baseURL = url
+})
+
+http.interceptors.request.use(async (config) => {
+  config.baseURL = await resolveApiBaseUrl()
+  return enrichRequestHeaders(config)
+})
 
 http.interceptors.response.use(
   (response) => response,

@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 
 import { inboundApi, inboundBatchApi } from '@/api/inventory'
 import { scanProductApi } from '@/api/products'
+import { listProductBatchesApi, createProductBatchApi } from '@/api/catalog'
 import { ApiClientError } from '@/api/http'
 import { useAuthStore } from '@/stores/auth'
 import type {
@@ -11,16 +12,8 @@ import type {
   InboundBatchResponseData,
   InboundRequest,
   InboundResponseData,
+  BatchData,
 } from '@/types/api'
-import {
-  readStoredScanMode,
-  resolveScanPreferenceScope,
-  writeStoredScanMode,
-} from '@/utils/sessionStorage'
-
-type InboundScanMode = 'scan_confirm' | 'continuous_scan'
-const INBOUND_SCAN_MODES: InboundScanMode[] = ['scan_confirm', 'continuous_scan']
-
 const authStore = useAuthStore()
 const router = useRouter()
 const route = useRoute()
@@ -33,6 +26,79 @@ const scanErrorText = ref('')
 const scanSuccessText = ref('')
 const result = ref<InboundResponseData | null>(null)
 const batchResult = ref<InboundBatchResponseData | null>(null)
+
+// Batch association modal
+interface BatchAssocTarget { product_id: number }
+const batchAssocQueue = ref<BatchAssocTarget[]>([])
+const batchAssocCurrent = ref<BatchAssocTarget | null>(null)
+const batchAssocExisting = ref<BatchData[]>([])
+const batchAssocLoading = ref(false)
+const batchAssocError = ref('')
+const batchAssocNewForm = reactive({
+  inbound_at: new Date().toISOString().substring(0, 10),
+  lot_number: '',
+  expires_at: '',
+  notes: '',
+})
+const batchAssocTab = ref<'pick' | 'create'>('pick')
+
+async function openBatchAssocForNext(): Promise<void> {
+  const next = batchAssocQueue.value.shift()
+  if (!next) { batchAssocCurrent.value = null; return }
+  batchAssocCurrent.value = next
+  batchAssocError.value = ''
+  batchAssocTab.value = 'pick'
+  batchAssocExisting.value = []
+  batchAssocLoading.value = true
+  try {
+    const res = await listProductBatchesApi(next.product_id, { only_active: true })
+    batchAssocExisting.value = res.data.batches ?? []
+  } catch (e) {
+    batchAssocError.value = e instanceof Error ? e.message : '获取批次失败'
+  } finally {
+    batchAssocLoading.value = false
+  }
+}
+
+function batchAssocSkip() { void openBatchAssocForNext() }
+
+async function batchAssocCreate() {
+  const cur = batchAssocCurrent.value
+  if (!cur) return
+  if (!batchAssocNewForm.inbound_at) { batchAssocError.value = '入库日期必填'; return }
+  batchAssocLoading.value = true; batchAssocError.value = ''
+  try {
+    await createProductBatchApi(cur.product_id, {
+      inbound_at: batchAssocNewForm.inbound_at,
+      lot_number: batchAssocNewForm.lot_number || undefined,
+      expires_at: batchAssocNewForm.expires_at || undefined,
+      notes: batchAssocNewForm.notes || undefined,
+    })
+    void openBatchAssocForNext()
+  } catch (e) {
+    batchAssocError.value = e instanceof Error ? e.message : '创建批次失败'
+  } finally {
+    batchAssocLoading.value = false
+  }
+}
+
+function triggerBatchAssoc(items: { product_id: number; track_batches?: boolean }[]): void {
+  const seen = new Set<number>()
+  const targets: BatchAssocTarget[] = []
+  for (const it of items) {
+    if (it.track_batches && !seen.has(it.product_id)) {
+      seen.add(it.product_id)
+      targets.push({ product_id: it.product_id })
+    }
+  }
+  if (!targets.length) return
+  batchAssocQueue.value = targets
+  batchAssocNewForm.inbound_at = new Date().toISOString().substring(0, 10)
+  batchAssocNewForm.lot_number = ''
+  batchAssocNewForm.expires_at = ''
+  batchAssocNewForm.notes = ''
+  void openBatchAssocForNext()
+}
 
 interface InboundDraftItem {
   local_id: number
@@ -61,26 +127,11 @@ const scanForm = reactive({
   barcode: '',
 })
 
-const scanMode = ref<InboundScanMode>('scan_confirm')
 const manualFormExpanded = ref(false)
-const scanBarcodeInputRef = ref<HTMLInputElement | null>(null)
-const scanConfirmQtyInputRef = ref<HTMLInputElement | null>(null)
-
-const scanConfirmSessionActive = ref(false)
-const scanConfirmProcessedCount = ref(0)
 const continuousSessionActive = ref(false)
 const continuousProcessedCount = ref(0)
 const continuousLastBarcode = ref('')
 const continuousLastAt = ref(0)
-
-const scanConfirmForm = reactive({
-  visible: false,
-  product_id: '',
-  product_name: '',
-  barcode: '',
-  unit_cost: '',
-  qty: '1',
-})
 
 const canSubmit = computed(() => {
   const role = authStore.session?.user.role
@@ -107,36 +158,12 @@ function formatApiError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback
 }
 
-function resolveInboundStoredMode(storedMode: string | null): InboundScanMode | null {
-  if (!storedMode) {
-    return null
-  }
-
-  if (storedMode === 'quick_accumulate') {
-    return 'continuous_scan'
-  }
-
-  if (INBOUND_SCAN_MODES.includes(storedMode as InboundScanMode)) {
-    return storedMode as InboundScanMode
-  }
-
-  return null
-}
-
 function resetScanForm(): void {
   scanForm.barcode = ''
-  scanConfirmSessionActive.value = false
-  scanConfirmProcessedCount.value = 0
   continuousSessionActive.value = false
   continuousProcessedCount.value = 0
   continuousLastBarcode.value = ''
   continuousLastAt.value = 0
-  scanConfirmForm.visible = false
-  scanConfirmForm.product_id = ''
-  scanConfirmForm.product_name = ''
-  scanConfirmForm.barcode = ''
-  scanConfirmForm.unit_cost = ''
-  scanConfirmForm.qty = '1'
   scanErrorText.value = ''
   scanSuccessText.value = ''
 }
@@ -201,54 +228,6 @@ function upsertDraftItem(payload: {
   })
 }
 
-function clearScanConfirmDraft(): void {
-  scanConfirmForm.visible = false
-  scanConfirmForm.product_id = ''
-  scanConfirmForm.product_name = ''
-  scanConfirmForm.barcode = ''
-  scanConfirmForm.unit_cost = ''
-  scanConfirmForm.qty = '1'
-}
-
-function openScanConfirmDialog(payload: {
-  product_id: string
-  product_name: string
-  barcode: string
-  unit_cost?: string
-}): void {
-  scanConfirmSessionActive.value = true
-  scanConfirmForm.visible = true
-  scanConfirmForm.product_id = payload.product_id
-  scanConfirmForm.product_name = payload.product_name
-  scanConfirmForm.barcode = payload.barcode
-  scanConfirmForm.unit_cost = payload.unit_cost?.trim() ?? ''
-  scanConfirmForm.qty = '1'
-  scanSuccessText.value = `扫码成功：#${payload.product_id} ${payload.product_name}，请确认后写入数量`
-
-  nextTick(() => {
-    const input = scanConfirmQtyInputRef.value
-    input?.focus()
-    input?.select()
-  })
-}
-
-function cancelScanConfirmDialog(): void {
-  clearScanConfirmDraft()
-  scanForm.barcode = ''
-
-  if (scanMode.value === 'scan_confirm') {
-    scanConfirmSessionActive.value = true
-    scanSuccessText.value = '已取消本次确认，可继续扫码'
-    focusScanBarcodeInput()
-  }
-}
-
-function focusScanBarcodeInput(): void {
-  nextTick(() => {
-    scanBarcodeInputRef.value?.focus()
-  })
-}
-
 function playContinuousSuccessVoice(): void {
   if (typeof window === 'undefined' || !('speechSynthesis' in window)) {
     return
@@ -288,35 +267,6 @@ function applyScannedInbound(payload: {
   return true
 }
 
-function applyScanConfirm(): void {
-  const qty = Number(scanConfirmForm.qty.trim())
-  if (!Number.isInteger(qty) || qty <= 0) {
-    scanErrorText.value = '确认区“数量”必须为正整数'
-    return
-  }
-
-  const ok = applyScannedInbound({
-    product_id: scanConfirmForm.product_id,
-    product_name: scanConfirmForm.product_name,
-    barcode: scanConfirmForm.barcode,
-    qty,
-    unit_cost: scanConfirmForm.unit_cost,
-  })
-  if (!ok) {
-    return
-  }
-
-  clearScanConfirmDraft()
-  scanForm.barcode = ''
-
-  if (scanMode.value === 'scan_confirm') {
-    scanConfirmSessionActive.value = true
-    scanConfirmProcessedCount.value += 1
-    scanSuccessText.value = `确认写入成功，确认续扫会话进行中（已处理 ${scanConfirmProcessedCount.value} 条）`
-    focusScanBarcodeInput()
-  }
-}
-
 async function scanAndAccumulate(options?: { forceQuickAccumulate?: boolean; fromContinuousSession?: boolean }): Promise<void> {
   if (scanLoading.value || loading.value) {
     return
@@ -352,11 +302,6 @@ async function scanAndAccumulate(options?: { forceQuickAccumulate?: boolean; fro
       barcode,
       qty: 1,
       unit_cost: defaultUnitCost,
-    }
-
-    if (scanMode.value === 'scan_confirm' && !options?.forceQuickAccumulate) {
-      openScanConfirmDialog(payload)
-      return
     }
 
     const ok = applyScannedInbound(payload)
@@ -403,31 +348,21 @@ function startContinuousScanSession(): void {
   continuousLastAt.value = 0
 }
 
-function stopScanConfirmSession(): void {
-  scanConfirmSessionActive.value = false
-  scanSuccessText.value = `确认续扫会话已结束，本次共处理 ${scanConfirmProcessedCount.value} 条`
-}
-
 function stopContinuousScanSession(): void {
   continuousSessionActive.value = false
   scanSuccessText.value = `连续扫码会话已结束，本次共处理 ${continuousProcessedCount.value} 条`
 }
 
 async function scanByCurrentMode(): Promise<void> {
-  if (scanMode.value === 'continuous_scan') {
-    if (!continuousSessionActive.value) {
-      startContinuousScanSession()
-      return
-    }
-
-    await scanAndAccumulate({
-      forceQuickAccumulate: true,
-      fromContinuousSession: true,
-    })
+  if (!continuousSessionActive.value) {
+    startContinuousScanSession()
     return
   }
 
-  await scanAndAccumulate()
+  await scanAndAccumulate({
+    forceQuickAccumulate: true,
+    fromContinuousSession: true,
+  })
 }
 
 function resetForm(): void {
@@ -551,6 +486,7 @@ async function submit(): Promise<void> {
       batchResult.value = response.data
       result.value = null
       successText.value = `批量入库成功：${response.data.biz_no}，共 ${response.data.items.length} 条`
+      triggerBatchAssoc(response.data.items)
     } else if (effectiveItems.length === 1) {
       const item = effectiveItems[0]!
       const payload: InboundRequest = {
@@ -566,6 +502,9 @@ async function submit(): Promise<void> {
       result.value = response.data
       batchResult.value = null
       successText.value = `入库成功：${response.data.biz_no}，当前库存 ${response.data.current_stock}`
+      if (response.data.track_batches) {
+        triggerBatchAssoc([{ product_id: response.data.product_id, track_batches: true }])
+      }
     }
 
     form.product_id = ''
@@ -584,19 +523,6 @@ async function submit(): Promise<void> {
 }
 
 onMounted(() => {
-  const scope = resolveScanPreferenceScope(authStore.session)
-  if (scope) {
-    const storedMode = readStoredScanMode(scope, 'inbound')
-    const resolvedMode = resolveInboundStoredMode(storedMode)
-    if (resolvedMode) {
-      scanMode.value = resolvedMode
-
-      if (storedMode !== resolvedMode) {
-        writeStoredScanMode(scope, 'inbound', resolvedMode)
-      }
-    }
-  }
-
   const createdProductId = firstQueryValue(route.query.created_product_id).trim()
   const createdBarcode = firstQueryValue(route.query.created_barcode).trim()
 
@@ -618,23 +544,6 @@ onMounted(() => {
     name: 'inbound',
   })
 })
-
-watch(scanMode, (value) => {
-  if (value !== 'scan_confirm') {
-    scanConfirmSessionActive.value = false
-    scanConfirmProcessedCount.value = 0
-    clearScanConfirmDraft()
-  }
-
-  if (value !== 'continuous_scan') {
-    continuousSessionActive.value = false
-  }
-
-  const scope = resolveScanPreferenceScope(authStore.session)
-  if (scope) {
-    writeStoredScanMode(scope, 'inbound', value)
-  }
-})
 </script>
 
 <template>
@@ -644,37 +553,12 @@ watch(scanMode, (value) => {
     <p v-if="!canSubmit" class="warn-text">当前角色无采购入库权限，仅 OWNER/PURCHASER 可操作。</p>
 
     <div class="card-panel form-grid" style="margin-bottom: 12px">
-      <h3>条码入库（模式化）</h3>
+      <h3>条码入库（自动模式）</h3>
 
       <form class="form-inline" @submit.prevent="scanByCurrentMode">
-        <div class="form-label inline">
-          <span>扫码模式</span>
-          <div class="scan-mode-tabs" role="tablist" aria-label="扫码模式">
-            <button
-              class="scan-mode-tab"
-              :class="{ 'is-active': scanMode === 'scan_confirm' }"
-              type="button"
-              :disabled="scanLoading || loading"
-              @click="scanMode = 'scan_confirm'"
-            >
-              确认写入
-            </button>
-            <button
-              class="scan-mode-tab"
-              :class="{ 'is-active': scanMode === 'continuous_scan' }"
-              type="button"
-              :disabled="scanLoading || loading"
-              @click="scanMode = 'continuous_scan'"
-            >
-              连续扫码
-            </button>
-          </div>
-        </div>
-
         <label class="form-label inline">
           <span>条码</span>
           <input
-            ref="scanBarcodeInputRef"
             v-model="scanForm.barcode"
             :disabled="scanLoading || loading"
             placeholder="扫码枪回车，例如：690123456789"
@@ -686,11 +570,9 @@ watch(scanMode, (value) => {
             <svg viewBox="0 0 24 24"><path d="M4 7h16v10H4z" /><path d="M8 7V5h8v2M12 12v5" /></svg>
           </span>
           {{
-            scanMode === 'continuous_scan'
-              ? continuousSessionActive
-                ? (scanLoading ? '识别中...' : '处理当前条码并累加')
-                : '开始连续扫码会话'
-              : (scanLoading ? '识别中...' : '按条码处理')
+            continuousSessionActive
+              ? (scanLoading ? '识别中...' : '处理当前条码并累加')
+              : '开始扫码会话'
           }}
         </button>
         <button class="btn btn-secondary" type="button" :disabled="scanLoading || loading" @click="resetScanForm">
@@ -700,16 +582,7 @@ watch(scanMode, (value) => {
           清空
         </button>
         <button
-          v-if="scanMode === 'scan_confirm' && scanConfirmSessionActive"
-          class="btn btn-secondary"
-          type="button"
-          :disabled="scanLoading || loading"
-          @click="stopScanConfirmSession"
-        >
-          结束确认续扫
-        </button>
-        <button
-          v-if="scanMode === 'continuous_scan' && continuousSessionActive"
+          v-if="continuousSessionActive"
           class="btn btn-secondary"
           type="button"
           :disabled="scanLoading || loading"
@@ -719,54 +592,11 @@ watch(scanMode, (value) => {
         </button>
       </form>
 
-      <p class="table-summary">命中商品后将自动回填商品信息，并在当前入库表单中累加数量。</p>
-      <p v-if="scanMode === 'continuous_scan'" class="table-summary">
-        连续扫码会话：{{ continuousSessionActive ? '进行中' : '未开始' }}，已处理 {{ continuousProcessedCount }} 条。
-      </p>
-      <p v-if="scanMode === 'scan_confirm'" class="table-summary">
-        确认续扫会话：{{ scanConfirmSessionActive ? '进行中' : '未开始' }}，已处理 {{ scanConfirmProcessedCount }} 条。
-      </p>
+      <p class="table-summary">命中商品后自动回填并累加到明细，重复扫码同商品会继续叠加数量。</p>
+      <p class="table-summary">扫码会话：{{ continuousSessionActive ? '进行中' : '未开始' }}，已处理 {{ continuousProcessedCount }} 条。</p>
 
       <p v-if="scanErrorText" class="error-text">{{ scanErrorText }}</p>
       <p v-if="scanSuccessText" class="success-text">{{ scanSuccessText }}</p>
-    </div>
-
-    <div
-      v-if="scanConfirmForm.visible"
-      class="modal-backdrop"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="scan-confirm-title"
-      @click.self="cancelScanConfirmDialog"
-    >
-      <div class="modal-card" @keydown.esc.prevent="cancelScanConfirmDialog">
-        <h3 id="scan-confirm-title">确认写入</h3>
-        <p class="table-summary">已命中商品：#{{ scanConfirmForm.product_id }} {{ scanConfirmForm.product_name }}</p>
-        <div class="form-inline form-inline-compact">
-          <label class="form-label inline">
-            <span>数量 *</span>
-            <input
-              ref="scanConfirmQtyInputRef"
-              v-model="scanConfirmForm.qty"
-              :disabled="scanLoading || loading"
-              placeholder="1"
-              @keydown.enter.prevent="applyScanConfirm"
-              @keydown.esc.prevent="cancelScanConfirmDialog"
-            />
-          </label>
-        </div>
-        <div class="form-actions">
-          <button class="btn" type="button" :disabled="scanLoading || loading" @click="applyScanConfirm">
-            <span class="btn-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24"><path d="m5 12 4 4 10-10" /></svg>
-            </span>
-            确认写入（Enter）
-          </button>
-          <button class="btn btn-secondary" type="button" :disabled="scanLoading || loading" @click="cancelScanConfirmDialog">
-            取消（Esc）
-          </button>
-        </div>
-      </div>
     </div>
 
     <div class="form-grid">
@@ -926,4 +756,67 @@ watch(scanMode, (value) => {
       </div>
     </div>
   </section>
+
+  <Teleport to="body">
+    <div v-if="batchAssocCurrent" class="modal-backdrop">
+      <div class="modal-card" style="max-width:480px;width:96vw">
+        <h3 style="margin:0 0 6px">批次关联</h3>
+        <p style="font-size:13px;color:#9aa5ba;margin:0 0 14px">
+          商品 #{{ batchAssocCurrent.product_id }} 已启用批次追踪，请为本次入库选择或新建批次。
+          <span v-if="batchAssocQueue.length">（还有 {{ batchAssocQueue.length }} 个商品待处理）</span>
+        </p>
+        <div class="scan-mode-tabs" style="margin-bottom:14px">
+          <button class="scan-mode-tab" :class="{ 'is-active': batchAssocTab === 'pick' }" @click="batchAssocTab = 'pick'">选择已有批次</button>
+          <button class="scan-mode-tab" :class="{ 'is-active': batchAssocTab === 'create' }" @click="batchAssocTab = 'create'">新建批次</button>
+        </div>
+        <p v-if="batchAssocError" class="error-text">{{ batchAssocError }}</p>
+        <template v-if="batchAssocTab === 'pick'">
+          <p v-if="batchAssocLoading" class="table-summary">加载批次中...</p>
+          <p v-else-if="!batchAssocExisting.length" class="table-summary">暂无有效批次，请切换到「新建批次」</p>
+          <div v-else class="table-wrapper" style="max-height:200px;overflow-y:auto">
+            <table class="data-table data-table-compact">
+              <thead><tr><th>批次号</th><th>入库日期</th><th>过期日期</th><th>状态</th></tr></thead>
+              <tbody>
+                <tr v-for="b in batchAssocExisting" :key="b.id" style="cursor:pointer" @click="batchAssocSkip()">
+                  <td>{{ b.lot_number || '—' }}</td>
+                  <td>{{ b.inbound_at }}</td>
+                  <td>{{ b.expires_at || '—' }}</td>
+                  <td><span class="badge" :class="b.expiry_level === 'OK' ? 'badge-ok' : 'badge-warning'">{{ b.expiry_level || '—' }}</span></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p style="font-size:12px;color:#9aa5ba;margin-top:8px">点击任意行即视为选中该批次并继续</p>
+        </template>
+        <template v-if="batchAssocTab === 'create'">
+          <div class="form-inline form-inline-compact">
+            <label class="form-label inline">
+              <span>入库日期 *</span>
+              <input v-model="batchAssocNewForm.inbound_at" type="date" :disabled="batchAssocLoading" />
+            </label>
+            <label class="form-label inline">
+              <span>批次号</span>
+              <input v-model="batchAssocNewForm.lot_number" :disabled="batchAssocLoading" placeholder="可选" />
+            </label>
+          </div>
+          <div class="form-inline form-inline-compact">
+            <label class="form-label inline">
+              <span>过期日期</span>
+              <input v-model="batchAssocNewForm.expires_at" type="date" :disabled="batchAssocLoading" />
+            </label>
+            <label class="form-label inline">
+              <span>备注</span>
+              <input v-model="batchAssocNewForm.notes" :disabled="batchAssocLoading" placeholder="可选" />
+            </label>
+          </div>
+        </template>
+        <div class="form-actions" style="margin-top:14px">
+          <button v-if="batchAssocTab === 'create'" class="btn" :disabled="batchAssocLoading" @click="batchAssocCreate">
+            {{ batchAssocLoading ? '创建中...' : '创建并继续' }}
+          </button>
+          <button class="btn btn-secondary" :disabled="batchAssocLoading" @click="batchAssocSkip">跳过</button>
+        </div>
+      </div>
+    </div>
+  </Teleport>
 </template>

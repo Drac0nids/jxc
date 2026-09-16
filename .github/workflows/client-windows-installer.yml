@@ -52,9 +52,26 @@ jobs:
         with:
           workspaces: |
             client/src-tauri -> target
+            server -> target
 
       - name: Install frontend deps
         run: npm ci
+
+      # 单机版：服务端二进制作为 Tauri sidecar (externalBin) 随包分发，
+      # 因此必须在 tauri build 之前产出目标三元组的 server 二进制。
+      - name: Build server sidecar
+        working-directory: server
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          cargo build --release --target $env:TARGET_TRIPLE
+          $src = "target/$env:TARGET_TRIPLE/release/server.exe"
+          if (!(Test-Path $src)) {
+            throw "server binary not found at $src"
+          }
+          $binDir = "../client/src-tauri/binaries"
+          New-Item -ItemType Directory -Path $binDir -Force | Out-Null
+          Copy-Item $src "$binDir/server-$env:TARGET_TRIPLE.exe" -Force
 
       - name: Build NSIS installer
         run: npm run tauri:build:win:nsis
@@ -90,6 +107,13 @@ jobs:
 
           Copy-Item $exe "$outDir/app.exe" -Force
 
+          # 便携包必须同时包含 sidecar（内嵌服务端），否则前端无法初始化
+          $sidecar = "src-tauri/binaries/server-$env:TARGET_TRIPLE.exe"
+          if (!(Test-Path $sidecar)) {
+            throw "sidecar not found at $sidecar"
+          }
+          Copy-Item $sidecar "$outDir/server.exe" -Force
+
           $webview = "src-tauri/target/$env:TARGET_TRIPLE/release/WebView2Loader.dll"
           if (Test-Path $webview) {
             Copy-Item $webview "$outDir/WebView2Loader.dll" -Force
@@ -101,6 +125,9 @@ jobs:
           }
 
           $include = @("$outDir/app.exe")
+          if (Test-Path "$outDir/server.exe") {
+            $include += "$outDir/server.exe"
+          }
           if (Test-Path "$outDir/WebView2Loader.dll") {
             $include += "$outDir/WebView2Loader.dll"
           }
@@ -125,6 +152,7 @@ jobs:
           name: jxc-windows-portable
           path: |
             client/dist-windows/app.exe
+            client/dist-windows/server.exe
             client/dist-windows/WebView2Loader.dll
             client/dist-windows/jxc-windows-x64-portable.zip
             client/dist-windows/jxc-windows-x64-portable.zip.sha256
