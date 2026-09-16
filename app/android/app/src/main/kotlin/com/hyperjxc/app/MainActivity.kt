@@ -1,4 +1,4 @@
-package com.example.jxc_app
+package com.hyperjxc.app
 
 import io.flutter.embedding.android.FlutterActivity
 

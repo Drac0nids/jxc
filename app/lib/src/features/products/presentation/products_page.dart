@@ -10,11 +10,9 @@ import '../application/product_controller.dart';
 
 import '../models/category_models.dart';
 import '../models/product_models.dart';
-import 'batch_management_page.dart';
 import 'category_management_page.dart';
 import 'create_product_sheet.dart';
 import 'product_detail_page.dart';
-import 'products_edit_page.dart';
 
 
 // 顶层常量，避免重复创建 RegExp
@@ -135,61 +133,6 @@ class _ProductsPageState extends State<ProductsPage> {
       ),
     );
     if (created != null) await _loadProducts(page: 1);
-  }
-
-  Future<void> _openEditPage(ProductData product) async {
-    final bool? changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute<bool>(
-        builder: (BuildContext context) => ProductsEditPage(
-          controller: widget.controller,
-          product: product,
-          moneyPattern: _moneyPattern,
-          categoryController: widget.categoryController,
-        ),
-      ),
-    );
-    if (changed == true) await _loadProducts(page: widget.controller.page);
-  }
-
-  Future<void> _deleteProduct(ProductData product) async {
-    final bool confirmed = await showDialog<bool>(
-          context: context,
-          builder: (BuildContext context) => AlertDialog(
-            title: const Text('确认删除商品'),
-            content: Text('即将永久删除「${product.name}」，此操作不可撤销。'),
-            actions: <Widget>[
-              TextButton(
-                onPressed: () => Navigator.of(context).pop(false),
-                child: const Text('取消'),
-              ),
-              FilledButton(
-                style: FilledButton.styleFrom(
-                  backgroundColor: Theme.of(context).colorScheme.error,
-                  foregroundColor: Theme.of(context).colorScheme.onError,
-                ),
-                onPressed: () => Navigator.of(context).pop(true),
-                child: const Text('确认删除'),
-              ),
-            ],
-          ),
-        ) ??
-        false;
-
-    if (!confirmed) return;
-
-    final DeleteProductResult? result = await widget.controller.deleteProduct(
-      id: product.id,
-      expectedVersion: product.version,
-    );
-
-    if (result != null && mounted) {
-      final bool needFallback =
-          widget.controller.list.length == 1 && widget.controller.page > 1;
-      await _loadProducts(
-          page: needFallback
-              ? widget.controller.page - 1
-              : widget.controller.page);
-    }
   }
 
   // ── Category filter picker ────────────────────────────────────────────────

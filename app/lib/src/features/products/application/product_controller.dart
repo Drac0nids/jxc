@@ -1,7 +1,6 @@
 import 'package:flutter/foundation.dart';
 
 import '../../../core/models/user_role.dart';
-import '../../../network/api_exception.dart';
 import '../../../network/exception_utils.dart';
 import '../models/product_models.dart';
 import '../models/product_repository.dart';
