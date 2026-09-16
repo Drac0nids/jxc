@@ -1,0 +1,72 @@
+name: Bug 报告
+description: 报告一个可复现的问题
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        感谢反馈。请尽量把信息填完整，尤其是部署形态和复现步骤。
+        安全问题请勿在此提交，请按 SECURITY.md 的方式私下报告。
+
+  - type: dropdown
+    id: form
+    attributes:
+      label: 部署形态
+      options:
+        - Android 单机版（APK）
+        - Windows 单机版（安装包 / 便携版）
+        - SaaS（服务端 + 客户端分离部署）
+        - 从源码运行
+    validations:
+      required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: 版本
+      description: Release 版本号（如 v0.1.1），或 commit SHA
+      placeholder: v0.1.1
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: 问题描述
+      description: 发生了什么？期望发生什么？
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: 复现步骤
+      placeholder: |
+        1. 打开 …
+        2. 点击 …
+        3. 看到 …
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: 日志 / 报错信息
+      description: |
+        如果是接口问题，请附上响应里的 code、message 与 request_id。
+        粘贴前请先去掉密钥、真实客户数据等敏感内容。
+      render: text
+    validations:
+      required: false
+
+  - type: dropdown
+    id: reproducible
+    attributes:
+      label: 是否稳定复现
+      options:
+        - 每次都复现
+        - 偶发
+        - 只出现过一次
+    validations:
+      required: false
