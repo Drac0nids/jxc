@@ -67,7 +67,7 @@ pub async fn create_purchase_order(
     }
 
     if state.repository.is_postgres() {
-        let pool = postgres_pool_or_none(&state);
+        let pool = &state.persistence;
 
         for item in &mut items {
             let product = state
@@ -281,7 +281,7 @@ pub async fn list_purchase_orders(
     let mut orders: Vec<PurchaseOrder> = if state.repository.is_postgres() {
         state
             .repository
-            .list_purchase_orders_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_purchase_orders_by_tenant(&state.persistence, auth.tenant_id)
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?
     } else {
@@ -357,7 +357,7 @@ pub async fn get_purchase_order(
     let order = if state.repository.is_postgres() {
         state
             .repository
-            .find_purchase_order_by_id(postgres_pool_or_none(&state), auth.tenant_id, id)
+            .find_purchase_order_by_id(&state.persistence, auth.tenant_id, id)
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?
             .ok_or_else(|| {
@@ -417,7 +417,7 @@ pub async fn confirm_purchase_order(
         let updated = state
             .repository
             .confirm_purchase_order(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 id,
                 req.expected_version,
@@ -588,7 +588,7 @@ pub async fn void_purchase_order(
         let updated = state
             .repository
             .void_purchase_order(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 id,
                 req.expected_version,

@@ -59,7 +59,7 @@ pub async fn list_users(
     let users = if state.repository.is_postgres() {
         state
             .repository
-            .list_users_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_users_by_tenant(&state.persistence, auth.tenant_id)
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?
     } else {
@@ -144,7 +144,7 @@ pub async fn create_user(
     if state.repository.is_postgres() {
         state
             .repository
-            .create_user(postgres_pool_or_none(&state), &user)
+            .create_user(&state.persistence, &user)
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?;
     } else {
@@ -225,7 +225,7 @@ pub async fn update_user_role(
         state
             .repository
             .update_user_role(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 user_id,
                 new_role,
@@ -235,7 +235,7 @@ pub async fn update_user_role(
 
         state
             .repository
-            .find_user_by_id(postgres_pool_or_none(&state), auth.tenant_id, user_id)
+            .find_user_by_id(&state.persistence, auth.tenant_id, user_id)
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?
             .ok_or_else(|| AppError::not_found("员工不存在").with_request_id(request_id.clone()))?
@@ -294,7 +294,7 @@ pub async fn reset_user_password(
         state
             .repository
             .reset_password(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 user_id,
                 &new_password_hash,
@@ -340,7 +340,7 @@ async fn get_user_by_id(
     if state.repository.is_postgres() {
         state
             .repository
-            .find_user_by_id(postgres_pool_or_none(state), tenant_id, user_id)
+            .find_user_by_id(&state.persistence, tenant_id, user_id)
             .await
             .map_err(|err| err.with_request_id(request_id.to_string()))?
             .ok_or_else(|| AppError::not_found("员工不存在").with_request_id(request_id.to_string()))
@@ -364,7 +364,7 @@ async fn count_owners_in_tenant(
     if state.repository.is_postgres() {
         let users = state
             .repository
-            .list_users_by_tenant(postgres_pool_or_none(state), tenant_id)
+            .list_users_by_tenant(&state.persistence, tenant_id)
             .await
             .map_err(|err| err.with_request_id(request_id.to_string()))?;
         Ok(users.iter().filter(|u| u.role == UserRole::Owner).count())
@@ -412,7 +412,7 @@ pub async fn delete_user(
 
     state
         .repository
-        .delete_user(postgres_pool_or_none(&state), auth.tenant_id, user_id)
+        .delete_user(&state.persistence, auth.tenant_id, user_id)
         .await
         .map_err(|err| err.with_request_id(request_id.clone()))?;
 

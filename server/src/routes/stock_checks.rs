@@ -62,7 +62,7 @@ pub async fn create_stock_check(
     }
 
     if state.repository.is_postgres() {
-        let pool = postgres_pool_or_none(&state);
+        let pool = &state.persistence;
 
         let mut items = Vec::with_capacity(item_product_ids.len());
         for product_id in item_product_ids {
@@ -258,7 +258,7 @@ pub async fn get_stock_check(
     let check = if state.repository.is_postgres() {
         state
             .repository
-            .find_stock_check_by_id(postgres_pool_or_none(&state), auth.tenant_id, id)
+            .find_stock_check_by_id(&state.persistence, auth.tenant_id, id)
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?
             .ok_or_else(|| {
@@ -321,7 +321,7 @@ pub async fn start_stock_check(
         let updated = state
             .repository
             .start_stock_check(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 id,
                 req.expected_version,
@@ -456,7 +456,7 @@ pub async fn confirm_stock_check(
         let updated = state
             .repository
             .confirm_stock_check(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 id,
                 req.expected_version,

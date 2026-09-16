@@ -97,11 +97,11 @@ pub async fn auth_middleware(
         return Err(AppError::unauthorized("token_type 非 access").with_request_id(request_id));
     }
 
-    let auth_context = if state.repository.is_postgres() {
+    let auth_context = if !state.repository.is_memory() {
         let user = state
             .repository
             .find_user_by_id(
-                state.persistence.postgres.as_ref(),
+                &state.persistence,
                 claims.tenant_id,
                 claims.user_id,
             )

@@ -60,7 +60,7 @@ pub async fn list_suppliers(
     axum::extract::Query(params): axum::extract::Query<std::collections::HashMap<String, String>>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
     let keyword = params.get("q").cloned();
 
     let suppliers = state
@@ -87,7 +87,7 @@ pub async fn create_supplier(
         return Err(AppError::bad_request("供应商名称不能为空"));
     }
 
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
     let supplier = state
         .repository
         .create_supplier(pool, auth.tenant_id, req.name.trim().to_string(), req.phone, req.notes)
@@ -108,7 +108,7 @@ pub async fn update_supplier(
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
     let supplier = state
         .repository
         .update_supplier(pool, auth.tenant_id, id, req.name, req.phone, req.notes)
@@ -128,7 +128,7 @@ pub async fn delete_supplier(
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "ADMIN"], &request_id)?;
 
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
     state
         .repository
         .delete_supplier(pool, auth.tenant_id, id)

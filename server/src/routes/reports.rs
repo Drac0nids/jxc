@@ -51,7 +51,7 @@ pub async fn get_dashboard_report(
     let products: Vec<Product> = if state.repository.is_postgres() {
         state
             .repository
-            .list_products_by_tenant_all(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_products_by_tenant_all(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let products = state.products.lock().map_err(|_| {
@@ -77,7 +77,7 @@ pub async fn get_dashboard_report(
     let sales_orders: Vec<SalesOrder> = if state.repository.is_postgres() {
         state
             .repository
-            .list_sales_orders_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_sales_orders_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let sales_orders = state.sales_orders.lock().map_err(|_| {
@@ -101,7 +101,7 @@ pub async fn get_dashboard_report(
     let stock_logs: Vec<StockLog> = if state.repository.is_postgres() {
         state
             .repository
-            .list_stock_logs_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_stock_logs_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let stock_logs = state.stock_logs.lock().map_err(|_| {
@@ -233,7 +233,7 @@ pub async fn get_dashboard_orders_drilldown(
     let sales_orders: Vec<SalesOrder> = if state.repository.is_postgres() {
         state
             .repository
-            .list_sales_orders_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_sales_orders_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let sales_orders = state.sales_orders.lock().map_err(|_| {
@@ -257,7 +257,7 @@ pub async fn get_dashboard_orders_drilldown(
     let stock_logs: Vec<StockLog> = if state.repository.is_postgres() {
         state
             .repository
-            .list_stock_logs_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_stock_logs_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let stock_logs = state.stock_logs.lock().map_err(|_| {
@@ -453,7 +453,7 @@ pub async fn get_dashboard_orders_drilldown(
     };
 
     // ── Postgres 路径：批量查当前页订单的 SN 码，按 (outbound_biz_no, product_id) group ──
-    if let Some(pool) = postgres_pool_or_none(&state) {
+    if let Some(pool) = state.persistence.postgres.as_ref() {
         let biz_nos: Vec<String> = list.iter().map(|o| o.biz_no.clone()).collect();
         if !biz_nos.is_empty() {
             let rows = sqlx::query(
@@ -570,7 +570,7 @@ pub async fn get_sales_report(
     let products: Vec<Product> = if state.repository.is_postgres() {
         state
             .repository
-            .list_products_by_tenant_all(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_products_by_tenant_all(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let products = state.products.lock().map_err(|_| {
@@ -592,7 +592,7 @@ pub async fn get_sales_report(
     let sales_orders: Vec<SalesOrder> = if state.repository.is_postgres() {
         state
             .repository
-            .list_sales_orders_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_sales_orders_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let sales_orders = state.sales_orders.lock().map_err(|_| {
@@ -616,7 +616,7 @@ pub async fn get_sales_report(
     let stock_logs: Vec<StockLog> = if state.repository.is_postgres() {
         state
             .repository
-            .list_stock_logs_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_stock_logs_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let stock_logs = state.stock_logs.lock().map_err(|_| {
@@ -830,7 +830,7 @@ pub async fn export_sales_report_csv(
     let products: Vec<Product> = if state.repository.is_postgres() {
         state
             .repository
-            .list_products_by_tenant_all(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_products_by_tenant_all(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let products = state.products.lock().map_err(|_| {
@@ -852,7 +852,7 @@ pub async fn export_sales_report_csv(
     let sales_orders: Vec<SalesOrder> = if state.repository.is_postgres() {
         state
             .repository
-            .list_sales_orders_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_sales_orders_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let sales_orders = state.sales_orders.lock().map_err(|_| {
@@ -876,7 +876,7 @@ pub async fn export_sales_report_csv(
     let stock_logs: Vec<StockLog> = if state.repository.is_postgres() {
         state
             .repository
-            .list_stock_logs_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_stock_logs_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let stock_logs = state.stock_logs.lock().map_err(|_| {
@@ -1074,7 +1074,7 @@ pub async fn get_reports_trend(
     let sales_orders: Vec<crate::models::SalesOrder> = if state.repository.is_postgres() {
         state
             .repository
-            .list_sales_orders_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_sales_orders_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let guard = state.sales_orders.lock().map_err(|_| {
@@ -1099,7 +1099,7 @@ pub async fn get_reports_trend(
     let stock_logs: Vec<crate::models::StockLog> = if state.repository.is_postgres() {
         state
             .repository
-            .list_stock_logs_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_stock_logs_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let guard = state.stock_logs.lock().map_err(|_| {

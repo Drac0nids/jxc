@@ -65,7 +65,7 @@ pub async fn create_sales_order(
     }
 
     if state.repository.is_postgres() {
-        let pool = postgres_pool_or_none(&state);
+        let pool = &state.persistence;
 
         for item in &mut items {
             let product = state
@@ -244,7 +244,7 @@ pub async fn get_sales_order(
     let order = if state.repository.is_postgres() {
         state
             .repository
-            .find_sales_order_by_id(postgres_pool_or_none(&state), auth.tenant_id, id)
+            .find_sales_order_by_id(&state.persistence, auth.tenant_id, id)
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?
             .ok_or_else(|| {
@@ -304,7 +304,7 @@ pub async fn confirm_sales_order(
         if auth.role.eq_ignore_ascii_case("SALES") {
             let order = state
                 .repository
-                .find_sales_order_by_id(postgres_pool_or_none(&state), auth.tenant_id, id)
+                .find_sales_order_by_id(&state.persistence, auth.tenant_id, id)
                 .await
                 .map_err(|err| err.with_request_id(request_id.clone()))?
                 .ok_or_else(|| {
@@ -320,7 +320,7 @@ pub async fn confirm_sales_order(
         let updated = state
             .repository
             .confirm_sales_order(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 id,
                 req.expected_version,
@@ -499,7 +499,7 @@ pub async fn void_sales_order(
         if auth.role.eq_ignore_ascii_case("SALES") {
             let order = state
                 .repository
-                .find_sales_order_by_id(postgres_pool_or_none(&state), auth.tenant_id, id)
+                .find_sales_order_by_id(&state.persistence, auth.tenant_id, id)
                 .await
                 .map_err(|err| err.with_request_id(request_id.clone()))?
                 .ok_or_else(|| {
@@ -515,7 +515,7 @@ pub async fn void_sales_order(
         let updated = state
             .repository
             .void_sales_order(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 id,
                 req.expected_version,
@@ -647,7 +647,7 @@ pub async fn return_sales_order(
         if auth.role.eq_ignore_ascii_case("SALES") {
             let order = state
                 .repository
-                .find_sales_order_by_id(postgres_pool_or_none(&state), auth.tenant_id, id)
+                .find_sales_order_by_id(&state.persistence, auth.tenant_id, id)
                 .await
                 .map_err(|err| err.with_request_id(request_id.clone()))?
                 .ok_or_else(|| {
@@ -667,7 +667,7 @@ pub async fn return_sales_order(
         let updated = state
             .repository
             .return_sales_order(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 id,
                 req.expected_version,

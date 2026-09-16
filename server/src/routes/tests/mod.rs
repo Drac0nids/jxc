@@ -26,6 +26,7 @@ fn make_test_state() -> AppState {
         allow_negative_stock: false,
         storage_backend: crate::config::StorageBackend::Memory,
         database_url: None,
+        sqlite_path: "jxc.db".to_string(),
         redis_url: None,
         postgres_max_connections: 10,
         barcode_lookup_api_url: None,

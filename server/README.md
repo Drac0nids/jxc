@@ -77,6 +77,38 @@
 - 审计增强（M1.2）：
   - 单据关键动作记录 `before_data/after_data + request_id` 到 `audit_logs`
 
+## 存储后端与单机模式（v1.7.0 新增）
+
+服务端支持三种可插拔存储后端，由 `STORAGE_BACKEND` 选择：
+
+| 后端 | 用途 | 说明 |
+| --- | --- | --- |
+| `postgres` | 多租户 SaaS（默认） | 主链路存储，配合 Redis 做幂等与缓存 |
+| `sqlite` | 单机版（本地模式） | 桌面端内嵌服务端使用，数据落在本地文件，无需服务器 |
+| `memory` | 本地冒烟 / 测试 | 进程内存储，重启后数据丢失 |
+
+单机模式相关配置：
+
+| 变量 | 默认值 | 说明 |
+| --- | --- | --- |
+| `STORAGE_BACKEND` | `postgres` | 设为 `sqlite` 启用单机模式 |
+| `SQLITE_PATH` | `jxc.db` | SQLite 数据文件路径 |
+
+单机模式启动示例：
+
+```bash
+cd server
+STORAGE_BACKEND=sqlite SQLITE_PATH=jxc.db cargo run
+```
+
+启动时行为差异：
+
+1. 自动应用 `migrations/sqlite/*.sql`（与 PostgreSQL 版一一等价的迁移脚本）。
+2. 首次启动自动创建单机租户（租户码 `local`）与管理员账号，并在日志中给出初始账号提示。
+3. 登录时租户码可选，未提供时回落 `local`；`postgres` 模式仍强制要求租户码。
+
+单机版整包（内嵌服务端 + 前端）由仓库根目录 `scripts/build-local.sh` 构建。
+
 ## 快速启动
 
 ```bash
@@ -509,7 +541,7 @@ curl -sS -D /tmp/export_headers_csv.txt -o /tmp/sales_report.csv \
 
 ## 当前限制
 
-- 默认使用 PostgreSQL 持久化；仅在显式设置 `STORAGE_BACKEND=memory` 时使用内存模式（重启后数据会丢失）。
+- 默认使用 PostgreSQL 持久化；`STORAGE_BACKEND=sqlite` 时使用本地 SQLite（单机版），`STORAGE_BACKEND=memory` 时使用内存模式（重启后数据会丢失）。
 - 报表已实现经营看板（`/reports/dashboard`）、销售报表（`/reports/sales`，`group_by=product`）与销售报表导出（`/reports/sales/export`，`format=csv/xlsx`）。
 - 审计查询已实现（`/audit/logs`，仅 `OWNER`，支持过滤与分页）。
 - 报表导出已支持 CSV/XLSX；xlsx 已支持基础样式、列宽、冻结表头、自动筛选、数值格式化与 SUMMARY 强调。
@@ -1571,4 +1603,3 @@ cargo test
 - `cargo fmt --all`：通过
 - `cargo check`：通过
 - `cargo test`：通过（**108 passed; 0 failed**）
-

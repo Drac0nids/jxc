@@ -626,7 +626,8 @@ async fn dashboard_report_should_use_stock_log_aligned_metrics() {
                 min_stock_limit: 5,
                 is_deleted: false,
                 category_id: None,
-track_batches: false,
+                track_batches: false,
+                track_serials: false,
             },
         );
     }

@@ -292,8 +292,8 @@ async fn user_management_create_user_with_duplicate_username_returns_4090() {
 
     let payload = json!({
         "username": "admin", // Duplicate
-        "name": "另一个管理员",
-        "role": "OWNER",
+        "name": "另一个销售",
+        "role": "SALES",
         "password": "password123"
     })
     .to_string();

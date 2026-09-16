@@ -123,7 +123,7 @@ pub async fn create_batch(
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
     let today = chrono::Utc::now().date_naive();
     let inbound_at = req.inbound_at.unwrap_or(today);
 
@@ -164,7 +164,7 @@ pub async fn list_batches(
     Query(q): Query<ListBatchesQuery>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
 
     let batches = state.repository.list_product_batches(
         pool,
@@ -186,7 +186,7 @@ pub async fn list_expiring_batches(
     Query(q): Query<ExpiringQuery>,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
 
     let within_days = q.within_days.unwrap_or(30).clamp(1, 365);
     let items = state.repository.list_expiring_batches(
@@ -211,7 +211,7 @@ pub async fn update_batch(
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
     let batch = state.repository.update_product_batch(
         pool,
         auth.tenant_id,
@@ -237,7 +237,7 @@ pub async fn mark_sold_out(
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "ADMIN", "PURCHASER"], &request_id)?;
 
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
     let batch = state.repository.mark_batch_sold_out(pool, auth.tenant_id, id).await?;
 
     let body = ApiResponse::success(batch_to_data(batch), request_id.clone());
@@ -254,7 +254,7 @@ pub async fn delete_batch(
     let request_id = resolve_request_id(&headers);
     ensure_role(&auth.role, &["OWNER", "ADMIN"], &request_id)?;
 
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
     state.repository.delete_product_batch(pool, auth.tenant_id, id).await?;
 
     let body = ApiResponse::success(json!(null), request_id.clone());

@@ -99,7 +99,7 @@ pub async fn list_audit_logs(
     let audit_logs = if state.repository.is_postgres() {
         state
             .repository
-            .list_audit_logs_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_audit_logs_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let audit_logs = state.audit_logs.lock().map_err(|_| {
@@ -276,7 +276,7 @@ pub async fn list_stock_logs(
     let stock_logs = if state.repository.is_postgres() {
         state
             .repository
-            .list_stock_logs_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_stock_logs_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let stock_logs = state.stock_logs.lock().map_err(|_| {
@@ -360,7 +360,7 @@ pub async fn list_stock_logs(
     // 操作人姓名映射
     let users = state
         .repository
-        .list_users_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+        .list_users_by_tenant(&state.persistence, auth.tenant_id)
         .await
         .unwrap_or_default();
     let user_name_map: std::collections::HashMap<String, String> = users

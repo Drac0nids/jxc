@@ -127,7 +127,7 @@ pub async fn barcode_lookup_product_name(
     let cache_record = if state.repository.is_postgres() {
         state
             .repository
-            .find_barcode_lookup_cache(postgres_pool_or_none(&state), auth.tenant_id, barcode)
+            .find_barcode_lookup_cache(&state.persistence, auth.tenant_id, barcode)
             .await?
     } else {
         let cache = state.barcode_lookup_cache.lock().map_err(|_| {
@@ -183,7 +183,7 @@ pub async fn barcode_lookup_product_name(
             if state.repository.is_postgres() {
                 state
                     .repository
-                    .upsert_barcode_lookup_cache(postgres_pool_or_none(&state), &cache_entry)
+                    .upsert_barcode_lookup_cache(&state.persistence, &cache_entry)
                     .await?;
             } else {
                 let mut cache = state.barcode_lookup_cache.lock().map_err(|_| {
@@ -269,7 +269,7 @@ pub async fn scan_product(
         state
             .repository
             .find_product_by_barcode(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 barcode,
                 false,
@@ -356,7 +356,7 @@ pub async fn list_products(
     let mut filtered = if state.repository.is_postgres() {
         state
             .repository
-            .list_products_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_products_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let products = state.products.lock().map_err(|_| {
@@ -448,7 +448,7 @@ pub async fn get_product(
     let product = if state.repository.is_postgres() {
         state
             .repository
-            .find_product_by_id(postgres_pool_or_none(&state), auth.tenant_id, id, false)
+            .find_product_by_id(&state.persistence, auth.tenant_id, id, false)
             .await?
             .ok_or_else(|| AppError::not_found("商品不存在").with_request_id(request_id.clone()))?
     } else {
@@ -537,7 +537,7 @@ pub async fn create_product(
             .map(str::trim)
             .filter(|v| !v.is_empty())
             .map(ToOwned::to_owned);
-        let pool = postgres_pool_or_none(&state);
+        let pool = &state.persistence;
 
         if let Some(existing_id) = state
             .repository
@@ -775,7 +775,7 @@ pub async fn update_product(
     }
 
     if state.repository.is_postgres() {
-        let pool = postgres_pool_or_none(&state);
+        let pool = &state.persistence;
         let existing = state
             .repository
             .find_product_by_id(pool, auth.tenant_id, id, false)
@@ -969,7 +969,7 @@ pub async fn delete_product(
     }
 
     if state.repository.is_postgres() {
-        let pool = postgres_pool_or_none(&state);
+        let pool = &state.persistence;
         let existing = state
             .repository
             .find_product_by_id(pool, auth.tenant_id, id, false)

@@ -110,7 +110,7 @@ pub async fn serial_inbound(
 
     state.repository
         .serial_inbound(
-            postgres_pool_or_none(&state),
+            &state.persistence,
             auth.tenant_id,
             req.product_id,
             req.batch_id,
@@ -168,7 +168,7 @@ pub async fn serial_outbound(
 
     let results = state.repository
         .serial_outbound(
-            postgres_pool_or_none(&state),
+            &state.persistence,
             auth.tenant_id,
             &biz_no,
             sell_price,
@@ -210,7 +210,7 @@ pub async fn query_serials(
     // 按 SN 精确查
     if let Some(sn) = &q.sn {
         let result = state.repository
-            .find_serial_by_sn(postgres_pool_or_none(&state), auth.tenant_id, sn)
+            .find_serial_by_sn(&state.persistence, auth.tenant_id, sn)
             .await
             .map_err(|e| e.with_request_id(request_id.clone()))?;
 
@@ -225,7 +225,7 @@ pub async fn query_serials(
 
     let list = state.repository
         .list_serials_by_product(
-            postgres_pool_or_none(&state),
+            &state.persistence,
             auth.tenant_id,
             product_id,
             q.status.as_deref(),
@@ -254,7 +254,7 @@ pub async fn list_serial_history(
 
     let (list, total) = state.repository
         .list_serials_history(
-            postgres_pool_or_none(&state),
+            &state.persistence,
             auth.tenant_id,
             q.status.as_deref(),
             page,

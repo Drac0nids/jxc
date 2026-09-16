@@ -77,15 +77,15 @@ pub async fn register(
         name: tenant_name.clone().unwrap_or_default(),
     };
 
-    if state.repository.is_postgres() {
+    if !state.repository.is_memory() {
         state
             .repository
-            .create_tenant(postgres_pool_or_none(&state), &tenant)
+            .create_tenant(&state.persistence, &tenant)
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?;
         state
             .repository
-            .create_user(postgres_pool_or_none(&state), &user)
+            .create_user(&state.persistence, &user)
             .await
             .map_err(|err| err.with_request_id(request_id.clone()))?;
     } else {
@@ -160,13 +160,20 @@ pub async fn login(
     }
 
     let username = req.username.trim();
-    let user = if state.repository.is_postgres() {
-        // PostgreSQL 模式强制要求租户码，确保多租户严格隔离
+    let user = if !state.repository.is_memory() {
+        // 单机 SQLite 默认租户码 local；PostgreSQL 仍强制要求租户码。
         let code = req
             .tenant_code
             .as_deref()
             .map(str::trim)
             .filter(|s| !s.is_empty())
+            .or_else(|| {
+                if state.repository.is_sqlite() {
+                    Some("local")
+                } else {
+                    None
+                }
+            })
             .ok_or_else(|| {
                 AppError::bad_request("请输入租户码").with_request_id(request_id.clone())
             })?;
@@ -174,7 +181,7 @@ pub async fn login(
         state
             .repository
             .find_user_by_tenant_code_and_username(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 code,
                 username,
             )
@@ -225,7 +232,12 @@ pub async fn login(
             "expires_in": state.config.access_token_exp_secs,
             "tenant_id": user.tenant_id,
             // 内存模式无 tenants 表，返回空；PostgreSQL 模式通过 tenant_code 查到后原样返回
-            "tenant_code": req.tenant_code.as_deref().map(str::trim).filter(|s| !s.is_empty()),
+            "tenant_code": req
+                .tenant_code
+                .as_deref()
+                .map(str::trim)
+                .filter(|s| !s.is_empty())
+                .or_else(|| if state.repository.is_sqlite() { Some("local") } else { None }),
             "user_info": {
                 "id": user.id,
                 "name": user.name,
@@ -262,11 +274,11 @@ pub async fn refresh_token(
         return Err(AppError::unauthorized("token_type 非 refresh").with_request_id(request_id));
     }
 
-    let user = if state.repository.is_postgres() {
+    let user = if !state.repository.is_memory() {
         state
             .repository
             .find_user_by_id(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 claims.tenant_id,
                 claims.user_id,
             )

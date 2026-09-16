@@ -4,6 +4,7 @@ use std::env;
 pub enum StorageBackend {
     Memory,
     Postgres,
+    Sqlite,
 }
 
 impl StorageBackend {
@@ -11,6 +12,7 @@ impl StorageBackend {
         match value.trim().to_ascii_lowercase().as_str() {
             "memory" => Self::Memory,
             "postgres" | "postgresql" | "pg" => Self::Postgres,
+            "sqlite" | "sqlite3" => Self::Sqlite,
             _ => Self::Postgres,
         }
     }
@@ -19,6 +21,7 @@ impl StorageBackend {
         match self {
             Self::Memory => "memory",
             Self::Postgres => "postgres",
+            Self::Sqlite => "sqlite",
         }
     }
 }
@@ -33,6 +36,7 @@ pub struct AppConfig {
     pub allow_negative_stock: bool,
     pub storage_backend: StorageBackend,
     pub database_url: Option<String>,
+    pub sqlite_path: String,
     pub redis_url: Option<String>,
     pub postgres_max_connections: u32,
     pub barcode_lookup_api_url: Option<String>,
@@ -71,6 +75,10 @@ impl AppConfig {
             .unwrap_or(StorageBackend::Postgres);
 
         let database_url = env::var("DATABASE_URL").ok().and_then(non_empty);
+        let sqlite_path = env::var("SQLITE_PATH")
+            .ok()
+            .and_then(non_empty)
+            .unwrap_or_else(|| "jxc.db".to_string());
         let redis_url = env::var("REDIS_URL").ok().and_then(non_empty);
         let postgres_max_connections = env::var("PG_MAX_CONNECTIONS")
             .ok()
@@ -101,6 +109,7 @@ impl AppConfig {
             allow_negative_stock,
             storage_backend,
             database_url,
+            sqlite_path,
             redis_url,
             postgres_max_connections,
             barcode_lookup_api_url,

@@ -30,16 +30,20 @@ pub struct MemoryRepository;
 #[derive(Debug, Clone, Copy, Default)]
 pub struct PostgresRepository;
 
+use crate::repository_sqlite::SqliteRepository;
+
 #[derive(Debug, Clone, Copy)]
 pub enum RepositoryProvider {
     Memory(MemoryRepository),
     Postgres(PostgresRepository),
+    Sqlite(SqliteRepository),
 }
 
 pub fn build_repository_provider(backend: StorageBackend) -> RepositoryProvider {
     match backend {
         StorageBackend::Memory => RepositoryProvider::Memory(MemoryRepository),
         StorageBackend::Postgres => RepositoryProvider::Postgres(PostgresRepository),
+        StorageBackend::Sqlite => RepositoryProvider::Sqlite(SqliteRepository),
     }
 }
 
@@ -48,6 +52,7 @@ impl RepositoryProvider {
         match self {
             Self::Memory(_) => "memory",
             Self::Postgres(_) => "postgres",
+            Self::Sqlite(_) => "sqlite",
         }
     }
 
@@ -55,113 +60,121 @@ impl RepositoryProvider {
         matches!(self, Self::Postgres(_))
     }
 
+    pub fn is_sqlite(&self) -> bool {
+        matches!(self, Self::Sqlite(_))
+    }
+
+    pub fn is_memory(&self) -> bool {
+        matches!(self, Self::Memory(_))
+    }
+
     pub async fn find_user_by_username(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         username: &str,
     ) -> Result<Option<User>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.find_user_by_username(pool, username).await,
+            Self::Postgres(repo) => repo.find_user_by_username(handles.postgres.as_ref(), username).await,
+            Self::Sqlite(repo) => repo.find_user_by_username(handles.sqlite.as_ref(), username).await,
             Self::Memory(_) => Ok(None),
         }
     }
 
     pub async fn find_user_by_id(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         user_id: Uuid,
     ) -> Result<Option<User>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.find_user_by_id(pool, tenant_id, user_id).await,
+            Self::Postgres(repo) => repo.find_user_by_id(handles.postgres.as_ref(), tenant_id, user_id).await,
+            Self::Sqlite(repo) => repo.find_user_by_id(handles.sqlite.as_ref(), tenant_id, user_id).await,
             Self::Memory(_) => Ok(None),
         }
     }
 
     pub async fn create_tenant(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant: &crate::models::Tenant,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.create_tenant(pool, tenant).await,
+            Self::Postgres(repo) => repo.create_tenant(handles.postgres.as_ref(), tenant).await,
+            Self::Sqlite(repo) => repo.create_tenant(handles.sqlite.as_ref(), tenant).await,
             Self::Memory(_) => Ok(()),
         }
     }
 
     pub async fn find_user_by_tenant_code_and_username(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_code: &str,
         username: &str,
     ) -> Result<Option<User>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.find_user_by_tenant_code_and_username(pool, tenant_code, username)
-                    .await
-            }
+            Self::Postgres(repo) => repo.find_user_by_tenant_code_and_username(handles.postgres.as_ref(), tenant_code, username).await,
+            Self::Sqlite(repo) => repo.find_user_by_tenant_code_and_username(handles.sqlite.as_ref(), tenant_code, username).await,
             Self::Memory(_) => Ok(None),
         }
     }
 
     pub async fn list_users_by_tenant(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
     ) -> Result<Vec<User>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.list_users_by_tenant(pool, tenant_id).await,
+            Self::Postgres(repo) => repo.list_users_by_tenant(handles.postgres.as_ref(), tenant_id).await,
+            Self::Sqlite(repo) => repo.list_users_by_tenant(handles.sqlite.as_ref(), tenant_id).await,
             Self::Memory(_) => Ok(Vec::new()),
         }
     }
 
-    pub async fn create_user(&self, pool: Option<&PgPool>, user: &User) -> Result<(), AppError> {
+    pub async fn create_user(&self, handles: &crate::persistence::PersistenceHandles, user: &User) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.create_user(pool, user).await,
+            Self::Postgres(repo) => repo.create_user(handles.postgres.as_ref(), user).await,
+            Self::Sqlite(repo) => repo.create_user(handles.sqlite.as_ref(), user).await,
             Self::Memory(_) => Err(unsupported_operation("create_user")),
         }
     }
 
     pub async fn update_user_role(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         user_id: Uuid,
         new_role: UserRole,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.update_user_role(pool, tenant_id, user_id, new_role)
-                    .await
-            }
+            Self::Postgres(repo) => repo.update_user_role(handles.postgres.as_ref(), tenant_id, user_id, new_role).await,
+            Self::Sqlite(repo) => repo.update_user_role(handles.sqlite.as_ref(), tenant_id, user_id, new_role).await,
             Self::Memory(_) => Err(unsupported_operation("update_user_role")),
         }
     }
 
     pub async fn reset_password(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         user_id: Uuid,
         new_password_hash: &str,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.reset_password(pool, tenant_id, user_id, new_password_hash)
-                    .await
-            }
+            Self::Postgres(repo) => repo.reset_password(handles.postgres.as_ref(), tenant_id, user_id, new_password_hash).await,
+            Self::Sqlite(repo) => repo.reset_password(handles.sqlite.as_ref(), tenant_id, user_id, new_password_hash).await,
             Self::Memory(_) => Err(unsupported_operation("reset_password")),
         }
     }
 
     pub async fn delete_user(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         user_id: Uuid,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.delete_user(pool, tenant_id, user_id).await,
+            Self::Postgres(repo) => repo.delete_user(handles.postgres.as_ref(), tenant_id, user_id).await,
+            Self::Sqlite(repo) => repo.delete_user(handles.sqlite.as_ref(), tenant_id, user_id).await,
             Self::Memory(_) => Err(unsupported_operation("delete_user")),
         }
     }
@@ -170,7 +183,7 @@ impl RepositoryProvider {
 
     pub async fn serial_inbound(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         product_id: i64,
         batch_id: Option<Uuid>,
@@ -179,253 +192,251 @@ impl RepositoryProvider {
         sns: &[String],
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.serial_inbound(pool, tenant_id, product_id, batch_id, unit_cost, inbound_biz_no, sns).await
-            }
+            Self::Postgres(repo) => repo.serial_inbound(handles.postgres.as_ref(), tenant_id, product_id, batch_id, unit_cost, inbound_biz_no, sns).await,
+            Self::Sqlite(repo) => repo.serial_inbound(handles.sqlite.as_ref(), tenant_id, product_id, batch_id, unit_cost, inbound_biz_no, sns).await,
             Self::Memory(_) => Err(unsupported_operation("serial_inbound")),
         }
     }
 
     pub async fn serial_outbound(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         outbound_biz_no: &str,
         sell_price: Option<Decimal>,
         sns: &[String],
     ) -> Result<Vec<SerialNumber>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.serial_outbound(pool, tenant_id, outbound_biz_no, sell_price, sns).await
-            }
+            Self::Postgres(repo) => repo.serial_outbound(handles.postgres.as_ref(), tenant_id, outbound_biz_no, sell_price, sns).await,
+            Self::Sqlite(repo) => repo.serial_outbound(handles.sqlite.as_ref(), tenant_id, outbound_biz_no, sell_price, sns).await,
             Self::Memory(_) => Err(unsupported_operation("serial_outbound")),
         }
     }
 
     pub async fn list_serials_by_product(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         product_id: i64,
         status_filter: Option<&str>,
     ) -> Result<Vec<SerialNumber>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.list_serials_by_product(pool, tenant_id, product_id, status_filter).await
-            }
+            Self::Postgres(repo) => repo.list_serials_by_product(handles.postgres.as_ref(), tenant_id, product_id, status_filter).await,
+            Self::Sqlite(repo) => repo.list_serials_by_product(handles.sqlite.as_ref(), tenant_id, product_id, status_filter).await,
             Self::Memory(_) => Ok(vec![]),
         }
     }
 
     pub async fn list_serials_history(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         status_filter: Option<&str>,
         page: i64,
         page_size: i64,
     ) -> Result<(Vec<SerialNumber>, i64), AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.list_serials_history(pool, tenant_id, status_filter, page, page_size).await
-            }
+            Self::Postgres(repo) => repo.list_serials_history(handles.postgres.as_ref(), tenant_id, status_filter, page, page_size).await,
+            Self::Sqlite(repo) => repo.list_serials_history(handles.sqlite.as_ref(), tenant_id, status_filter, page, page_size).await,
             Self::Memory(_) => Ok((vec![], 0)),
         }
     }
 
     pub async fn find_serial_by_sn(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         sn: &str,
     ) -> Result<Option<SerialNumber>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.find_serial_by_sn(pool, tenant_id, sn).await,
+            Self::Postgres(repo) => repo.find_serial_by_sn(handles.postgres.as_ref(), tenant_id, sn).await,
+            Self::Sqlite(repo) => repo.find_serial_by_sn(handles.sqlite.as_ref(), tenant_id, sn).await,
             Self::Memory(_) => Ok(None),
         }
     }
 
     pub async fn find_product_by_barcode(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         barcode: &str,
         include_deleted: bool,
     ) -> Result<Option<Product>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.find_product_by_barcode(pool, tenant_id, barcode, include_deleted)
-                    .await
-            }
+            Self::Postgres(repo) => repo.find_product_by_barcode(handles.postgres.as_ref(), tenant_id, barcode, include_deleted).await,
+            Self::Sqlite(repo) => repo.find_product_by_barcode(handles.sqlite.as_ref(), tenant_id, barcode, include_deleted).await,
             Self::Memory(_) => Ok(None),
         }
     }
 
     pub async fn find_barcode_lookup_cache(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         barcode: &str,
     ) -> Result<Option<BarcodeLookupCache>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.find_barcode_lookup_cache(pool, tenant_id, barcode).await
-            }
+            Self::Postgres(repo) => repo.find_barcode_lookup_cache(handles.postgres.as_ref(), tenant_id, barcode).await,
+            Self::Sqlite(repo) => repo.find_barcode_lookup_cache(handles.sqlite.as_ref(), tenant_id, barcode).await,
             Self::Memory(_) => Ok(None),
         }
     }
 
     pub async fn upsert_barcode_lookup_cache(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         cache: &BarcodeLookupCache,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.upsert_barcode_lookup_cache(pool, cache).await,
+            Self::Postgres(repo) => repo.upsert_barcode_lookup_cache(handles.postgres.as_ref(), cache).await,
+            Self::Sqlite(repo) => repo.upsert_barcode_lookup_cache(handles.sqlite.as_ref(), cache).await,
             Self::Memory(_) => Ok(()),
         }
     }
 
     pub async fn list_products_by_tenant(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
     ) -> Result<Vec<Product>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.list_products_by_tenant(pool, tenant_id).await,
+            Self::Postgres(repo) => repo.list_products_by_tenant(handles.postgres.as_ref(), tenant_id).await,
+            Self::Sqlite(repo) => repo.list_products_by_tenant(handles.sqlite.as_ref(), tenant_id).await,
             Self::Memory(_) => Ok(Vec::new()),
         }
     }
 
     pub async fn list_products_by_tenant_all(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
     ) -> Result<Vec<Product>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.list_products_by_tenant_all(pool, tenant_id).await,
+            Self::Postgres(repo) => repo.list_products_by_tenant_all(handles.postgres.as_ref(), tenant_id).await,
+            Self::Sqlite(repo) => repo.list_products_by_tenant_all(handles.sqlite.as_ref(), tenant_id).await,
             Self::Memory(_) => Ok(Vec::new()),
         }
     }
 
     pub async fn list_sales_orders_by_tenant(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
     ) -> Result<Vec<SalesOrder>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.list_sales_orders_by_tenant(pool, tenant_id).await,
+            Self::Postgres(repo) => repo.list_sales_orders_by_tenant(handles.postgres.as_ref(), tenant_id).await,
+            Self::Sqlite(repo) => repo.list_sales_orders_by_tenant(handles.sqlite.as_ref(), tenant_id).await,
             Self::Memory(_) => Ok(Vec::new()),
         }
     }
 
     pub async fn list_purchase_orders_by_tenant(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
     ) -> Result<Vec<PurchaseOrder>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.list_purchase_orders_by_tenant(pool, tenant_id).await,
+            Self::Postgres(repo) => repo.list_purchase_orders_by_tenant(handles.postgres.as_ref(), tenant_id).await,
+            Self::Sqlite(repo) => repo.list_purchase_orders_by_tenant(handles.sqlite.as_ref(), tenant_id).await,
             Self::Memory(_) => Ok(Vec::new()),
         }
     }
 
     pub async fn list_stock_logs_by_tenant(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
     ) -> Result<Vec<StockLog>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.list_stock_logs_by_tenant(pool, tenant_id).await,
+            Self::Postgres(repo) => repo.list_stock_logs_by_tenant(handles.postgres.as_ref(), tenant_id).await,
+            Self::Sqlite(repo) => repo.list_stock_logs_by_tenant(handles.sqlite.as_ref(), tenant_id).await,
             Self::Memory(_) => Ok(Vec::new()),
         }
     }
 
     pub async fn list_audit_logs_by_tenant(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
     ) -> Result<Vec<AuditLog>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.list_audit_logs_by_tenant(pool, tenant_id).await,
+            Self::Postgres(repo) => repo.list_audit_logs_by_tenant(handles.postgres.as_ref(), tenant_id).await,
+            Self::Sqlite(repo) => repo.list_audit_logs_by_tenant(handles.sqlite.as_ref(), tenant_id).await,
             Self::Memory(_) => Ok(Vec::new()),
         }
     }
 
     pub async fn find_product_by_id(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         product_id: i64,
         include_deleted: bool,
     ) -> Result<Option<Product>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.find_product_by_id(pool, tenant_id, product_id, include_deleted)
-                    .await
-            }
+            Self::Postgres(repo) => repo.find_product_by_id(handles.postgres.as_ref(), tenant_id, product_id, include_deleted).await,
+            Self::Sqlite(repo) => repo.find_product_by_id(handles.sqlite.as_ref(), tenant_id, product_id, include_deleted).await,
             Self::Memory(_) => Ok(None),
         }
     }
 
     pub async fn is_barcode_taken(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         barcode: &str,
         exclude_product_id: Option<i64>,
     ) -> Result<Option<i64>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.is_barcode_taken(pool, tenant_id, barcode, exclude_product_id)
-                    .await
-            }
+            Self::Postgres(repo) => repo.is_barcode_taken(handles.postgres.as_ref(), tenant_id, barcode, exclude_product_id).await,
+            Self::Sqlite(repo) => repo.is_barcode_taken(handles.sqlite.as_ref(), tenant_id, barcode, exclude_product_id).await,
             Self::Memory(_) => Ok(None),
         }
     }
 
     pub async fn is_sku_taken(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         sku: &str,
         exclude_product_id: Option<i64>,
     ) -> Result<bool, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.is_sku_taken(pool, tenant_id, sku, exclude_product_id)
-                    .await
-            }
+            Self::Postgres(repo) => repo.is_sku_taken(handles.postgres.as_ref(), tenant_id, sku, exclude_product_id).await,
+            Self::Sqlite(repo) => repo.is_sku_taken(handles.sqlite.as_ref(), tenant_id, sku, exclude_product_id).await,
             Self::Memory(_) => Ok(false),
         }
     }
 
-    pub async fn next_product_id(&self, pool: Option<&PgPool>) -> Result<i64, AppError> {
+    pub async fn next_product_id(&self, handles: &crate::persistence::PersistenceHandles) -> Result<i64, AppError> {
         match self {
-            Self::Postgres(repo) => repo.next_product_id(pool).await,
+            Self::Postgres(repo) => repo.next_product_id(handles.postgres.as_ref()).await,
+            Self::Sqlite(repo) => repo.next_product_id(handles.sqlite.as_ref()).await,
             Self::Memory(_) => Err(unsupported_operation("next_product_id")),
         }
     }
 
     pub async fn create_product(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         product: &Product,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.create_product(pool, product).await,
+            Self::Postgres(repo) => repo.create_product(handles.postgres.as_ref(), product).await,
+            Self::Sqlite(repo) => repo.create_product(handles.sqlite.as_ref(), product).await,
             Self::Memory(_) => Err(unsupported_operation("create_product")),
         }
     }
 
     pub async fn update_product(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         product: &Product,
 
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.update_product(pool, product).await,
+            Self::Postgres(repo) => repo.update_product(handles.postgres.as_ref(), product).await,
+            Self::Sqlite(repo) => repo.update_product(handles.sqlite.as_ref(), product).await,
             Self::Memory(_) => Err(unsupported_operation("update_product")),
         }
     }
@@ -433,7 +444,7 @@ impl RepositoryProvider {
     #[allow(clippy::too_many_arguments)]
     pub async fn inbound(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         product_id: i64,
         qty: i32,
@@ -443,19 +454,8 @@ impl RepositoryProvider {
         operator_id: Uuid,
     ) -> Result<Product, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.inbound(
-                    pool,
-                    tenant_id,
-                    product_id,
-                    qty,
-                    unit_cost,
-
-                    biz_no,
-                    operator_id,
-                )
-                .await
-            }
+            Self::Postgres(repo) => repo.inbound(handles.postgres.as_ref(), tenant_id, product_id, qty, unit_cost, biz_no, operator_id).await,
+            Self::Sqlite(repo) => repo.inbound(handles.sqlite.as_ref(), tenant_id, product_id, qty, unit_cost, biz_no, operator_id).await,
             Self::Memory(_) => Err(unsupported_operation("inbound")),
         }
     }
@@ -463,17 +463,15 @@ impl RepositoryProvider {
     #[allow(clippy::too_many_arguments)]
     pub async fn inbound_batch(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         biz_no: &str,
         items: &[(i64, i32, Option<Decimal>, Option<i32>)],
         operator_id: Uuid,
     ) -> Result<Vec<Product>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.inbound_batch(pool, tenant_id, biz_no, items, operator_id)
-                    .await
-            }
+            Self::Postgres(repo) => repo.inbound_batch(handles.postgres.as_ref(), tenant_id, biz_no, items, operator_id).await,
+            Self::Sqlite(repo) => repo.inbound_batch(handles.sqlite.as_ref(), tenant_id, biz_no, items, operator_id).await,
             Self::Memory(_) => Err(unsupported_operation("inbound_batch")),
         }
     }
@@ -481,7 +479,7 @@ impl RepositoryProvider {
     #[allow(clippy::too_many_arguments)]
     pub async fn outbound(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         biz_no: &str,
         default_expected_version: Option<i32>,
@@ -490,93 +488,80 @@ impl RepositoryProvider {
         operator_id: Uuid,
     ) -> Result<Vec<Product>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.outbound(
-                    pool,
-                    tenant_id,
-                    biz_no,
-                    default_expected_version,
-                    items,
-                    allow_negative_stock,
-                    operator_id,
-                )
-                .await
-            }
+            Self::Postgres(repo) => repo.outbound(handles.postgres.as_ref(), tenant_id, biz_no, default_expected_version, items, allow_negative_stock, operator_id).await,
+            Self::Sqlite(repo) => repo.outbound(handles.sqlite.as_ref(), tenant_id, biz_no, default_expected_version, items, allow_negative_stock, operator_id).await,
             Self::Memory(_) => Err(unsupported_operation("outbound")),
         }
     }
 
     pub async fn load_idempotency_record(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         scope_key: &str,
     ) -> Result<Option<IdempotencyRecord>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.load_idempotency_record(pool, scope_key).await,
+            Self::Postgres(repo) => repo.load_idempotency_record(handles.postgres.as_ref(), scope_key).await,
+            Self::Sqlite(repo) => repo.load_idempotency_record(handles.sqlite.as_ref(), scope_key).await,
             Self::Memory(_) => Err(unsupported_operation("load_idempotency_record")),
         }
     }
 
     pub async fn save_idempotency_record(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         scope_key: &str,
         request_payload: &Value,
         response_body: &Value,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.save_idempotency_record(pool, scope_key, request_payload, response_body)
-                    .await
-            }
+            Self::Postgres(repo) => repo.save_idempotency_record(handles.postgres.as_ref(), scope_key, request_payload, response_body).await,
+            Self::Sqlite(repo) => repo.save_idempotency_record(handles.sqlite.as_ref(), scope_key, request_payload, response_body).await,
             Self::Memory(_) => Err(unsupported_operation("save_idempotency_record")),
         }
     }
 
-    pub async fn next_purchase_order_id(&self, pool: Option<&PgPool>) -> Result<i64, AppError> {
+    pub async fn next_purchase_order_id(&self, handles: &crate::persistence::PersistenceHandles) -> Result<i64, AppError> {
         match self {
-            Self::Postgres(repo) => repo.next_purchase_order_id(pool).await,
+            Self::Postgres(repo) => repo.next_purchase_order_id(handles.postgres.as_ref()).await,
+            Self::Sqlite(repo) => repo.next_purchase_order_id(handles.sqlite.as_ref()).await,
             Self::Memory(_) => Err(unsupported_operation("next_purchase_order_id")),
         }
     }
 
     pub async fn is_purchase_order_biz_no_taken(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         biz_no: &str,
     ) -> Result<bool, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.is_purchase_order_biz_no_taken(pool, tenant_id, biz_no)
-                    .await
-            }
+            Self::Postgres(repo) => repo.is_purchase_order_biz_no_taken(handles.postgres.as_ref(), tenant_id, biz_no).await,
+            Self::Sqlite(repo) => repo.is_purchase_order_biz_no_taken(handles.sqlite.as_ref(), tenant_id, biz_no).await,
             Self::Memory(_) => Ok(false),
         }
     }
 
     pub async fn create_purchase_order(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         order: &PurchaseOrder,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.create_purchase_order(pool, order).await,
+            Self::Postgres(repo) => repo.create_purchase_order(handles.postgres.as_ref(), order).await,
+            Self::Sqlite(repo) => repo.create_purchase_order(handles.sqlite.as_ref(), order).await,
             Self::Memory(_) => Err(unsupported_operation("create_purchase_order")),
         }
     }
 
     pub async fn find_purchase_order_by_id(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         order_id: i64,
     ) -> Result<Option<PurchaseOrder>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.find_purchase_order_by_id(pool, tenant_id, order_id)
-                    .await
-            }
+            Self::Postgres(repo) => repo.find_purchase_order_by_id(handles.postgres.as_ref(), tenant_id, order_id).await,
+            Self::Sqlite(repo) => repo.find_purchase_order_by_id(handles.sqlite.as_ref(), tenant_id, order_id).await,
             Self::Memory(_) => Ok(None),
         }
     }
@@ -584,7 +569,7 @@ impl RepositoryProvider {
     #[allow(clippy::too_many_arguments)]
     pub async fn confirm_purchase_order(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         order_id: i64,
         expected_version: Option<i32>,
@@ -592,17 +577,8 @@ impl RepositoryProvider {
         request_id: &str,
     ) -> Result<PurchaseOrder, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.confirm_purchase_order(
-                    pool,
-                    tenant_id,
-                    order_id,
-                    expected_version,
-                    operator_id,
-                    request_id,
-                )
-                .await
-            }
+            Self::Postgres(repo) => repo.confirm_purchase_order(handles.postgres.as_ref(), tenant_id, order_id, expected_version, operator_id, request_id).await,
+            Self::Sqlite(repo) => repo.confirm_purchase_order(handles.sqlite.as_ref(), tenant_id, order_id, expected_version, operator_id, request_id).await,
             Self::Memory(_) => Err(unsupported_operation("confirm_purchase_order")),
         }
     }
@@ -610,7 +586,7 @@ impl RepositoryProvider {
     #[allow(clippy::too_many_arguments)]
     pub async fn void_purchase_order(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         order_id: i64,
         expected_version: Option<i32>,
@@ -619,63 +595,54 @@ impl RepositoryProvider {
         request_id: &str,
     ) -> Result<PurchaseOrder, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.void_purchase_order(
-                    pool,
-                    tenant_id,
-                    order_id,
-                    expected_version,
-                    allow_negative_stock,
-                    operator_id,
-                    request_id,
-                )
-                .await
-            }
+            Self::Postgres(repo) => repo.void_purchase_order(handles.postgres.as_ref(), tenant_id, order_id, expected_version, allow_negative_stock, operator_id, request_id).await,
+            Self::Sqlite(repo) => repo.void_purchase_order(handles.sqlite.as_ref(), tenant_id, order_id, expected_version, allow_negative_stock, operator_id, request_id).await,
             Self::Memory(_) => Err(unsupported_operation("void_purchase_order")),
         }
     }
 
-    pub async fn next_sales_order_id(&self, pool: Option<&PgPool>) -> Result<i64, AppError> {
+    pub async fn next_sales_order_id(&self, handles: &crate::persistence::PersistenceHandles) -> Result<i64, AppError> {
         match self {
-            Self::Postgres(repo) => repo.next_sales_order_id(pool).await,
+            Self::Postgres(repo) => repo.next_sales_order_id(handles.postgres.as_ref()).await,
+            Self::Sqlite(repo) => repo.next_sales_order_id(handles.sqlite.as_ref()).await,
             Self::Memory(_) => Err(unsupported_operation("next_sales_order_id")),
         }
     }
 
     pub async fn is_sales_order_biz_no_taken(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         biz_no: &str,
     ) -> Result<bool, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.is_sales_order_biz_no_taken(pool, tenant_id, biz_no)
-                    .await
-            }
+            Self::Postgres(repo) => repo.is_sales_order_biz_no_taken(handles.postgres.as_ref(), tenant_id, biz_no).await,
+            Self::Sqlite(repo) => repo.is_sales_order_biz_no_taken(handles.sqlite.as_ref(), tenant_id, biz_no).await,
             Self::Memory(_) => Ok(false),
         }
     }
 
     pub async fn create_sales_order(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         order: &SalesOrder,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.create_sales_order(pool, order).await,
+            Self::Postgres(repo) => repo.create_sales_order(handles.postgres.as_ref(), order).await,
+            Self::Sqlite(repo) => repo.create_sales_order(handles.sqlite.as_ref(), order).await,
             Self::Memory(_) => Err(unsupported_operation("create_sales_order")),
         }
     }
 
     pub async fn find_sales_order_by_id(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         order_id: i64,
     ) -> Result<Option<SalesOrder>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.find_sales_order_by_id(pool, tenant_id, order_id).await,
+            Self::Postgres(repo) => repo.find_sales_order_by_id(handles.postgres.as_ref(), tenant_id, order_id).await,
+            Self::Sqlite(repo) => repo.find_sales_order_by_id(handles.sqlite.as_ref(), tenant_id, order_id).await,
             Self::Memory(_) => Ok(None),
         }
     }
@@ -683,7 +650,7 @@ impl RepositoryProvider {
     #[allow(clippy::too_many_arguments)]
     pub async fn confirm_sales_order(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         order_id: i64,
         expected_version: Option<i32>,
@@ -692,18 +659,8 @@ impl RepositoryProvider {
         request_id: &str,
     ) -> Result<SalesOrder, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.confirm_sales_order(
-                    pool,
-                    tenant_id,
-                    order_id,
-                    expected_version,
-                    allow_negative_stock,
-                    operator_id,
-                    request_id,
-                )
-                .await
-            }
+            Self::Postgres(repo) => repo.confirm_sales_order(handles.postgres.as_ref(), tenant_id, order_id, expected_version, allow_negative_stock, operator_id, request_id).await,
+            Self::Sqlite(repo) => repo.confirm_sales_order(handles.sqlite.as_ref(), tenant_id, order_id, expected_version, allow_negative_stock, operator_id, request_id).await,
             Self::Memory(_) => Err(unsupported_operation("confirm_sales_order")),
         }
     }
@@ -711,7 +668,7 @@ impl RepositoryProvider {
     #[allow(clippy::too_many_arguments)]
     pub async fn void_sales_order(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         order_id: i64,
         expected_version: Option<i32>,
@@ -719,17 +676,8 @@ impl RepositoryProvider {
         request_id: &str,
     ) -> Result<SalesOrder, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.void_sales_order(
-                    pool,
-                    tenant_id,
-                    order_id,
-                    expected_version,
-                    operator_id,
-                    request_id,
-                )
-                .await
-            }
+            Self::Postgres(repo) => repo.void_sales_order(handles.postgres.as_ref(), tenant_id, order_id, expected_version, operator_id, request_id).await,
+            Self::Sqlite(repo) => repo.void_sales_order(handles.sqlite.as_ref(), tenant_id, order_id, expected_version, operator_id, request_id).await,
             Self::Memory(_) => Err(unsupported_operation("void_sales_order")),
         }
     }
@@ -737,7 +685,7 @@ impl RepositoryProvider {
     #[allow(clippy::too_many_arguments)]
     pub async fn return_sales_order(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         order_id: i64,
         expected_version: Option<i32>,
@@ -747,64 +695,54 @@ impl RepositoryProvider {
         request_id: &str,
     ) -> Result<SalesOrder, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.return_sales_order(
-                    pool,
-                    tenant_id,
-                    order_id,
-                    expected_version,
-                    return_items,
-                    remark,
-                    operator_id,
-                    request_id,
-                )
-                .await
-            }
+            Self::Postgres(repo) => repo.return_sales_order(handles.postgres.as_ref(), tenant_id, order_id, expected_version, return_items, remark, operator_id, request_id).await,
+            Self::Sqlite(repo) => repo.return_sales_order(handles.sqlite.as_ref(), tenant_id, order_id, expected_version, return_items, remark, operator_id, request_id).await,
             Self::Memory(_) => Err(unsupported_operation("return_sales_order")),
         }
     }
 
-    pub async fn next_stock_check_id(&self, pool: Option<&PgPool>) -> Result<i64, AppError> {
+    pub async fn next_stock_check_id(&self, handles: &crate::persistence::PersistenceHandles) -> Result<i64, AppError> {
         match self {
-            Self::Postgres(repo) => repo.next_stock_check_id(pool).await,
+            Self::Postgres(repo) => repo.next_stock_check_id(handles.postgres.as_ref()).await,
+            Self::Sqlite(repo) => repo.next_stock_check_id(handles.sqlite.as_ref()).await,
             Self::Memory(_) => Err(unsupported_operation("next_stock_check_id")),
         }
     }
 
     pub async fn is_stock_check_biz_no_taken(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         biz_no: &str,
     ) -> Result<bool, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.is_stock_check_biz_no_taken(pool, tenant_id, biz_no)
-                    .await
-            }
+            Self::Postgres(repo) => repo.is_stock_check_biz_no_taken(handles.postgres.as_ref(), tenant_id, biz_no).await,
+            Self::Sqlite(repo) => repo.is_stock_check_biz_no_taken(handles.sqlite.as_ref(), tenant_id, biz_no).await,
             Self::Memory(_) => Ok(false),
         }
     }
 
     pub async fn create_stock_check(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         check: &StockCheck,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.create_stock_check(pool, check).await,
+            Self::Postgres(repo) => repo.create_stock_check(handles.postgres.as_ref(), check).await,
+            Self::Sqlite(repo) => repo.create_stock_check(handles.sqlite.as_ref(), check).await,
             Self::Memory(_) => Err(unsupported_operation("create_stock_check")),
         }
     }
 
     pub async fn find_stock_check_by_id(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         check_id: i64,
     ) -> Result<Option<StockCheck>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.find_stock_check_by_id(pool, tenant_id, check_id).await,
+            Self::Postgres(repo) => repo.find_stock_check_by_id(handles.postgres.as_ref(), tenant_id, check_id).await,
+            Self::Sqlite(repo) => repo.find_stock_check_by_id(handles.sqlite.as_ref(), tenant_id, check_id).await,
             Self::Memory(_) => Ok(None),
         }
     }
@@ -812,7 +750,7 @@ impl RepositoryProvider {
     #[allow(clippy::too_many_arguments)]
     pub async fn start_stock_check(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         check_id: i64,
         expected_version: Option<i32>,
@@ -820,17 +758,8 @@ impl RepositoryProvider {
         request_id: &str,
     ) -> Result<StockCheck, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.start_stock_check(
-                    pool,
-                    tenant_id,
-                    check_id,
-                    expected_version,
-                    operator_id,
-                    request_id,
-                )
-                .await
-            }
+            Self::Postgres(repo) => repo.start_stock_check(handles.postgres.as_ref(), tenant_id, check_id, expected_version, operator_id, request_id).await,
+            Self::Sqlite(repo) => repo.start_stock_check(handles.sqlite.as_ref(), tenant_id, check_id, expected_version, operator_id, request_id).await,
             Self::Memory(_) => Err(unsupported_operation("start_stock_check")),
         }
     }
@@ -838,7 +767,7 @@ impl RepositoryProvider {
     #[allow(clippy::too_many_arguments)]
     pub async fn confirm_stock_check(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         check_id: i64,
         expected_version: Option<i32>,
@@ -848,19 +777,8 @@ impl RepositoryProvider {
         request_id: &str,
     ) -> Result<StockCheck, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.confirm_stock_check(
-                    pool,
-                    tenant_id,
-                    check_id,
-                    expected_version,
-                    actual_items,
-                    remark,
-                    operator_id,
-                    request_id,
-                )
-                .await
-            }
+            Self::Postgres(repo) => repo.confirm_stock_check(handles.postgres.as_ref(), tenant_id, check_id, expected_version, actual_items, remark, operator_id, request_id).await,
+            Self::Sqlite(repo) => repo.confirm_stock_check(handles.sqlite.as_ref(), tenant_id, check_id, expected_version, actual_items, remark, operator_id, request_id).await,
             Self::Memory(_) => Err(unsupported_operation("confirm_stock_check")),
         }
     }
@@ -869,63 +787,65 @@ impl RepositoryProvider {
 
     pub async fn list_categories_by_tenant(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
     ) -> Result<Vec<Category>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.list_categories_by_tenant(pool, tenant_id).await,
+            Self::Postgres(repo) => repo.list_categories_by_tenant(handles.postgres.as_ref(), tenant_id).await,
+            Self::Sqlite(repo) => repo.list_categories_by_tenant(handles.sqlite.as_ref(), tenant_id).await,
             Self::Memory(_) => Ok(Vec::new()),
         }
     }
 
     pub async fn find_category_by_id(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         category_id: i64,
     ) -> Result<Option<Category>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.find_category_by_id(pool, tenant_id, category_id).await,
+            Self::Postgres(repo) => repo.find_category_by_id(handles.postgres.as_ref(), tenant_id, category_id).await,
+            Self::Sqlite(repo) => repo.find_category_by_id(handles.sqlite.as_ref(), tenant_id, category_id).await,
             Self::Memory(_) => Ok(None),
         }
     }
 
     pub async fn create_category(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         category: &Category,
     ) -> Result<Category, AppError> {
         match self {
-            Self::Postgres(repo) => repo.create_category(pool, category).await,
+            Self::Postgres(repo) => repo.create_category(handles.postgres.as_ref(), category).await,
+            Self::Sqlite(repo) => repo.create_category(handles.sqlite.as_ref(), category).await,
             Self::Memory(_) => Err(unsupported_operation("create_category")),
         }
     }
 
     pub async fn update_category(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         category_id: i64,
         name: &str,
         sort_order: i32,
     ) -> Result<Category, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.update_category(pool, tenant_id, category_id, name, sort_order)
-                    .await
-            }
+            Self::Postgres(repo) => repo.update_category(handles.postgres.as_ref(), tenant_id, category_id, name, sort_order).await,
+            Self::Sqlite(repo) => repo.update_category(handles.sqlite.as_ref(), tenant_id, category_id, name, sort_order).await,
             Self::Memory(_) => Err(unsupported_operation("update_category")),
         }
     }
 
     pub async fn delete_category(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         category_id: i64,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.delete_category(pool, tenant_id, category_id).await,
+            Self::Postgres(repo) => repo.delete_category(handles.postgres.as_ref(), tenant_id, category_id).await,
+            Self::Sqlite(repo) => repo.delete_category(handles.sqlite.as_ref(), tenant_id, category_id).await,
             Self::Memory(_) => Err(unsupported_operation("delete_category")),
         }
     }
@@ -934,33 +854,35 @@ impl RepositoryProvider {
 
     pub async fn list_suppliers(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         keyword: Option<String>,
     ) -> Result<Vec<Supplier>, AppError> {
         match self {
-            Self::Postgres(repo) => repo.list_suppliers(pool, tenant_id, keyword).await,
+            Self::Postgres(repo) => repo.list_suppliers(handles.postgres.as_ref(), tenant_id, keyword).await,
+            Self::Sqlite(repo) => repo.list_suppliers(handles.sqlite.as_ref(), tenant_id, keyword).await,
             Self::Memory(_) => Ok(Vec::new()),
         }
     }
 
     pub async fn create_supplier(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         name: String,
         phone: Option<String>,
         notes: Option<String>,
     ) -> Result<Supplier, AppError> {
         match self {
-            Self::Postgres(repo) => repo.create_supplier(pool, tenant_id, name, phone, notes).await,
+            Self::Postgres(repo) => repo.create_supplier(handles.postgres.as_ref(), tenant_id, name, phone, notes).await,
+            Self::Sqlite(repo) => repo.create_supplier(handles.sqlite.as_ref(), tenant_id, name, phone, notes).await,
             Self::Memory(_) => Err(unsupported_operation("create_supplier")),
         }
     }
 
     pub async fn update_supplier(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         id: i64,
         name: Option<String>,
@@ -968,19 +890,21 @@ impl RepositoryProvider {
         notes: Option<String>,
     ) -> Result<Supplier, AppError> {
         match self {
-            Self::Postgres(repo) => repo.update_supplier(pool, tenant_id, id, name, phone, notes).await,
+            Self::Postgres(repo) => repo.update_supplier(handles.postgres.as_ref(), tenant_id, id, name, phone, notes).await,
+            Self::Sqlite(repo) => repo.update_supplier(handles.sqlite.as_ref(), tenant_id, id, name, phone, notes).await,
             Self::Memory(_) => Err(unsupported_operation("update_supplier")),
         }
     }
 
     pub async fn delete_supplier(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         id: i64,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.delete_supplier(pool, tenant_id, id).await,
+            Self::Postgres(repo) => repo.delete_supplier(handles.postgres.as_ref(), tenant_id, id).await,
+            Self::Sqlite(repo) => repo.delete_supplier(handles.sqlite.as_ref(), tenant_id, id).await,
             Self::Memory(_) => Err(unsupported_operation("delete_supplier")),
         }
     }
@@ -989,7 +913,7 @@ impl RepositoryProvider {
 
     pub async fn create_product_batch(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         product_id: i64,
         lot_number: String,
@@ -1002,7 +926,13 @@ impl RepositoryProvider {
         match self {
             Self::Postgres(repo) => {
                 repo.create_product_batch(
-                    pool, tenant_id, product_id, lot_number, supplier, inbound_at,
+                    handles.postgres.as_ref(), tenant_id, product_id, lot_number, supplier, inbound_at,
+                    produced_at, expires_at, notes,
+                ).await
+            }
+            Self::Sqlite(repo) => {
+                repo.create_product_batch(
+                    handles.sqlite.as_ref(), tenant_id, product_id, lot_number, supplier, inbound_at,
                     produced_at, expires_at, notes,
                 ).await
             }
@@ -1012,63 +942,61 @@ impl RepositoryProvider {
 
     pub async fn count_batches_by_date(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         product_id: i64,
         date: chrono::NaiveDate,
     ) -> Result<i64, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.count_batches_by_date(pool, tenant_id, product_id, date).await
-            }
+            Self::Postgres(repo) => repo.count_batches_by_date(handles.postgres.as_ref(), tenant_id, product_id, date).await,
+            Self::Sqlite(repo) => repo.count_batches_by_date(handles.sqlite.as_ref(), tenant_id, product_id, date).await,
             Self::Memory(_) => Ok(0),
         }
     }
 
     pub async fn list_product_batches(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         product_id: Option<i64>,
         only_active: bool,
     ) -> Result<Vec<ProductBatch>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.list_product_batches(pool, tenant_id, product_id, only_active).await
-            }
+            Self::Postgres(repo) => repo.list_product_batches(handles.postgres.as_ref(), tenant_id, product_id, only_active).await,
+            Self::Sqlite(repo) => repo.list_product_batches(handles.sqlite.as_ref(), tenant_id, product_id, only_active).await,
             Self::Memory(_) => Err(unsupported_operation("list_product_batches")),
         }
     }
 
     pub async fn list_expiring_batches(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         within_days: i32,
     ) -> Result<Vec<ProductBatchWithProduct>, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.list_expiring_batches(pool, tenant_id, within_days).await
-            }
+            Self::Postgres(repo) => repo.list_expiring_batches(handles.postgres.as_ref(), tenant_id, within_days).await,
+            Self::Sqlite(repo) => repo.list_expiring_batches(handles.sqlite.as_ref(), tenant_id, within_days).await,
             Self::Memory(_) => Err(unsupported_operation("list_expiring_batches")),
         }
     }
 
     pub async fn mark_batch_sold_out(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         batch_id: i64,
     ) -> Result<ProductBatch, AppError> {
         match self {
-            Self::Postgres(repo) => repo.mark_batch_sold_out(pool, tenant_id, batch_id).await,
+            Self::Postgres(repo) => repo.mark_batch_sold_out(handles.postgres.as_ref(), tenant_id, batch_id).await,
+            Self::Sqlite(repo) => repo.mark_batch_sold_out(handles.sqlite.as_ref(), tenant_id, batch_id).await,
             Self::Memory(_) => Err(unsupported_operation("mark_batch_sold_out")),
         }
     }
 
     pub async fn update_product_batch(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         batch_id: i64,
         lot_number: Option<String>,
@@ -1078,23 +1006,21 @@ impl RepositoryProvider {
         notes: Option<String>,
     ) -> Result<ProductBatch, AppError> {
         match self {
-            Self::Postgres(repo) => {
-                repo.update_product_batch(
-                    pool, tenant_id, batch_id, lot_number, supplier, produced_at, expires_at, notes,
-                ).await
-            }
+            Self::Postgres(repo) => repo.update_product_batch(handles.postgres.as_ref(), tenant_id, batch_id, lot_number, supplier, produced_at, expires_at, notes,).await,
+            Self::Sqlite(repo) => repo.update_product_batch(handles.sqlite.as_ref(), tenant_id, batch_id, lot_number, supplier, produced_at, expires_at, notes,).await,
             Self::Memory(_) => Err(unsupported_operation("update_product_batch")),
         }
     }
 
     pub async fn delete_product_batch(
         &self,
-        pool: Option<&PgPool>,
+        handles: &crate::persistence::PersistenceHandles,
         tenant_id: Uuid,
         batch_id: i64,
     ) -> Result<(), AppError> {
         match self {
-            Self::Postgres(repo) => repo.delete_product_batch(pool, tenant_id, batch_id).await,
+            Self::Postgres(repo) => repo.delete_product_batch(handles.postgres.as_ref(), tenant_id, batch_id).await,
+            Self::Sqlite(repo) => repo.delete_product_batch(handles.sqlite.as_ref(), tenant_id, batch_id).await,
             Self::Memory(_) => Err(unsupported_operation("delete_product_batch")),
         }
     }

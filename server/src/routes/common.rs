@@ -522,7 +522,7 @@ pub async fn load_product_name_map(
     if state.repository.is_postgres() {
         let products = state
             .repository
-            .list_products_by_tenant_all(postgres_pool_or_none(state), tenant_id)
+            .list_products_by_tenant_all(&state.persistence, tenant_id)
             .await
             .map_err(|err| err.with_request_id(request_id.to_string()))?;
 
@@ -1194,7 +1194,7 @@ pub async fn try_idempotent_replay(
     if state.repository.is_postgres() {
         if let Some(record) = state
             .repository
-            .load_idempotency_record(postgres_pool_or_none(state), scope_key)
+            .load_idempotency_record(&state.persistence, scope_key)
             .await?
         {
             if &record.request_payload != request_payload {
@@ -1267,7 +1267,7 @@ pub async fn save_idempotency_record(
         return state
             .repository
             .save_idempotency_record(
-                postgres_pool_or_none(state),
+                &state.persistence,
                 scope_key,
                 &request_payload,
                 &response_body,

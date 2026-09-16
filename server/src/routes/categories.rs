@@ -107,7 +107,7 @@ pub async fn list_category_tree(
     headers: HeaderMap,
 ) -> Result<Response, AppError> {
     let request_id = resolve_request_id(&headers);
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
 
     let categories = state
         .repository
@@ -149,7 +149,7 @@ pub async fn create_category(
         .with_request_id(request_id));
     }
 
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
     let sort_order = req.sort_order.unwrap_or(0);
 
     // 计算层级（从父分类推导）
@@ -216,7 +216,7 @@ pub async fn update_category(
         .with_request_id(request_id));
     }
 
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
 
     // 读取现有分类
     let existing = state
@@ -270,7 +270,7 @@ pub async fn delete_category(
         .with_request_id(request_id));
     }
 
-    let pool = postgres_pool_or_none(&state);
+    let pool = &state.persistence;
     state
         .repository
         .delete_category(pool, auth.tenant_id, id)

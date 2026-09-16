@@ -44,7 +44,7 @@ pub async fn list_low_stock_alerts(
     let products = if state.repository.is_postgres() {
         state
             .repository
-            .list_products_by_tenant(postgres_pool_or_none(&state), auth.tenant_id)
+            .list_products_by_tenant(&state.persistence, auth.tenant_id)
             .await?
     } else {
         let products = state.products.lock().map_err(|_| {
@@ -175,7 +175,7 @@ pub async fn inbound(
             state
                 .repository
                 .find_product_by_barcode(
-                    postgres_pool_or_none(&state),
+                    &state.persistence,
                     auth.tenant_id,
                     barcode,
                     false,
@@ -201,7 +201,7 @@ pub async fn inbound(
         let updated = state
             .repository
             .inbound(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 resolved_product_id,
                 req.qty,
@@ -369,7 +369,7 @@ pub async fn inbound_batch(
                 state
                     .repository
                     .find_product_by_barcode(
-                        postgres_pool_or_none(&state),
+                        &state.persistence,
                         auth.tenant_id,
                         barcode,
                         false,
@@ -388,7 +388,7 @@ pub async fn inbound_batch(
         let updated_products = state
             .repository
             .inbound_batch(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 &biz_no,
                 &repo_items,
@@ -601,7 +601,7 @@ pub async fn outbound(
         let updated_products = state
             .repository
             .outbound(
-                postgres_pool_or_none(&state),
+                &state.persistence,
                 auth.tenant_id,
                 &biz_no,
                 req.expected_version,
