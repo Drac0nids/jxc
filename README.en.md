@@ -152,6 +152,23 @@ These are explicitly **not implemented yet**, listed here rather than left impli
 - **Release artifacts are signed with the debug key**; a release keystore is required before
   public distribution.
 
+## Roadmap
+
+Shipped so far: M1 (auth, products, purchase inbound, sales outbound), M2 (stocktaking, low-stock
+alerts, dashboard, sales report, audit), M3 (PostgreSQL persistence for the main flows, exports,
+contract and ops closure), the Windows standalone build (SQLite + Tauri sidecar in a single
+package), and the Android standalone build (server compiled to a `cdylib` and started inside the
+app process).
+
+Next up:
+
+- Implement optimistic locking: consume `expected_version` and return `4091`, then un-ignore the 5 regression tests.
+- Move ID allocation to a PostgreSQL `SEQUENCE` instead of `MAX(id) + 1` plus an advisory lock.
+- Trim the Android APK (LTO, per-form dependency trimming) and configure release signing.
+- Add an Android offline queue with conflict handling, plus refresh-token auto-renewal.
+- Verify PostgreSQL and SQLite migration parity to prevent semantic drift between the three forms.
+- Add an automated load-testing baseline (inventory concurrency, offline replay, idempotency conflicts).
+
 ## Contributing
 
 Issues and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for the workflow and

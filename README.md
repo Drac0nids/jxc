@@ -3,6 +3,8 @@
 [![ci](https://github.com/Drac0nids/jxc/actions/workflows/ci.yml/badge.svg)](https://github.com/Drac0nids/jxc/actions/workflows/ci.yml)
 [![License](https://img.shields.io/badge/license-Apache--2.0-blue.svg)](LICENSE)
 
+[中文](README.md) | [English](README.en.md)
+
 **一套 Rust 业务内核，三种交付形态。** 同一套领域逻辑与 API 契约同时支撑多租户 SaaS、Windows 单机版
 和 Android 单机版；两个单机形态**安装即用** —— 不需要服务器、不需要单独安装数据库、完全离线运行。
 
