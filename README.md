@@ -24,14 +24,21 @@
 
 ## 交付形态
 
-同一套业务代码支撑两种交付形态，差异仅在存储实现与部署方式：
+同一套业务代码与领域逻辑支撑三种交付形态，差异只在存储实现与进程编排：
 
 | 形态 | 适用对象 | 组成 | 数据存储 |
 | --- | --- | --- | --- |
 | **SaaS 版（多租户）** | 多门店、多角色的成长型商户 | 服务端与客户端分离部署 | PostgreSQL + Redis |
-| **单机版（本地模式）** | 单店、单机、无运维能力的个体商户 | 单个 Windows 桌面应用：内嵌服务端（Tauri sidecar）+ 打包后的前端 | 本地 SQLite 数据文件 |
+| **Windows 单机版** | 单店、单机、无运维能力的个体商户 | 单个桌面应用：内嵌服务端（Tauri sidecar）+ 打包后的前端 | 本地 SQLite 数据文件 |
+| **Android 单机版** | 只有一台手机的最小商户 | 单个 APK：服务端编译为 `libjxc_server.so`，在 App 进程内启动 | 本地 SQLite 数据文件（应用私有目录） |
 
-单机版安装即用：不需要服务器，也不需要单独安装数据库，可完全离线运行。构建方式见[单机版（本地模式）](#单机版本地模式)。
+两个单机形态都是安装即用：不需要服务器、不需要单独安装数据库，可完全离线运行。区别在于服务端的承载方式——桌面端把服务端当 sidecar 子进程拉起，Android 端受平台限制（Android 10+ 禁止从应用数据目录执行二进制）改用 `cdylib` + FFI 在 App 进程内启动。
+
+<p align="center">
+  <img src="docs/screenshots/android-login.png" width="240" alt="Android 单机版登录页" />
+  <img src="docs/screenshots/android-dashboard.png" width="240" alt="经营看板" />
+  <img src="docs/screenshots/android-features.png" width="240" alt="功能总览" />
+</p>
 
 ## 下载
 
@@ -41,6 +48,7 @@
 | --- | --- |
 | `极速云进销存_*_x64-setup.exe` | Windows 安装包（NSIS），内嵌服务端 + 本地 SQLite |
 | `jxc-windows-x64-portable.zip` | 绿色便携版，解压即用（含内嵌服务端） |
+| `app-release.apk` | Android 单机版 APK，安装即在手机上独立运行 |
 
 产物由 CI 在 Windows runner 上构建，随附 `.sha256` 校验文件。运行需要 Windows 10/11 x64 与 WebView2 运行时（较新的 Windows 已内置）。
 
@@ -80,6 +88,8 @@
 
 注册 / 登录 / 登出与会话持久化；经营看板与订单下钻、销售趋势、利润趋势、热销榜；商品管理（商品档案、分类管理、批次与效期批次、低库存预警）；摄像头 / 扫码枪 / 手工输入三种方式兼容的入库与出库扫码（含确认后自动续扫）；采购单、库存盘点与盘点流水、入库记录查询。
 
+Android 端同时是**单机版**：服务端以 `libjxc_server.so` 形式内嵌在 App 进程内，全部功能在手机上离线可用，不需要任何服务器（SaaS 形态下也可通过 `--dart-define=API_BASE_URL` 指向远端服务端）。
+
 ## 技术栈
 
 | 层 | 选型 |
@@ -87,7 +97,8 @@
 | 服务端 | Rust（edition 2024）+ Axum 0.7 + sqlx 0.8 + PostgreSQL + Redis + JWT + `rust_decimal` |
 | 数据 | PostgreSQL（SaaS 主链路）或 SQLite（单机版），各 17 个迁移脚本、启动时自动应用；Redis 用于幂等与缓存，未配置时退回内存态 |
 | Windows 端 | Tauri 2 + Vue 3 + TypeScript + Pinia + axios + Vite |
-| Android 端 | Flutter + dio + mobile_scanner + fl_chart + shared_preferences |
+| Android 端 | Flutter + dio + mobile_scanner + fl_chart + shared_preferences + `dart:ffi`（加载内嵌服务端） |
+| 单机打包 | Tauri sidecar（Windows）/ `cargo-ndk` + `cdylib` + JNI-free FFI（Android） |
 
 ## 仓库结构
 
@@ -109,8 +120,9 @@ jxc/
 │  └─ src-tauri/           # Tauri Rust 壳工程（单机版以 sidecar 内嵌服务端）
 ├─ app/                    # Android 端（Flutter）
 │  └─ lib/src/features/    # auth / dashboard / inventory / products …
-├─ scripts/                # build-local.sh：单机版一键打包
-├─ docs/                   # 项目上下文、技术上下文、系统模式、进度记录
+│  └─ android/app/src/main/jniLibs/  # 各 ABI 的 libjxc_server.so（构建产物，不入库）
+├─ scripts/                # build-local.sh（Windows 单机版）/ build-android-local.sh（Android 单机版）
+├─ docs/                   # 项目上下文、技术上下文、系统模式、进度记录、界面截图
 ├─ 产品需求文档.md          # PRD 基线
 ├─ 架构设计文档.md          # 架构设计基线
 └─ API接口定义文档.md       # 接口契约基线
@@ -154,9 +166,9 @@ npm run tauri:build:win:portable:dist   # Windows 便携版（含 sha256）
 
 CI 工作流 `.github/workflows/client-windows-installer.yml` 在 Windows runner 上产出 NSIS 安装包与便携包。
 
-### 单机版（本地模式）
+### Windows 单机版
 
-单机版把服务端编译为 Tauri sidecar，与前端一起打成单个桌面应用：
+把服务端编译为 Tauri sidecar，与前端一起打成单个桌面应用：
 
 ```bash
 ./scripts/build-local.sh                                # 本机原生构建
@@ -175,6 +187,22 @@ STORAGE_BACKEND=sqlite SQLITE_PATH=jxc.db cargo run
 首次启动会自动创建单机租户（租户码 `local`）与管理员账号，数据落在 `SQLITE_PATH` 指定的 SQLite 文件里。
 
 > `client/src-tauri/binaries/` 存放 sidecar 产物，不入库，由构建脚本生成。
+
+### Android 单机版
+
+服务端编译为 `libjxc_server.so`（`cdylib`），随 APK 分发，由 App 通过 `dart:ffi` 在进程内启动，只监听 `127.0.0.1`、端口由系统分配：
+
+```bash
+rustup target add aarch64-linux-android armv7-linux-androideabi
+cargo install cargo-ndk
+
+./scripts/build-android-local.sh                          # arm64 + armv7
+ABIS=arm64-v8a ./scripts/build-android-local.sh           # 只编 arm64（更快）
+```
+
+产物：`app/build/app/outputs/flutter-apk/app-release.apk`（同时生成 `app/android/app/src/main/jniLibs/<abi>/libjxc_server.so`）。
+
+安装后首次启动会自动创建本地租户（租户码 `local`）与管理员账号（`admin` / `admin123`），数据保存在应用私有目录，卸载即清理。
 
 ## 工程约束
 
@@ -217,22 +245,22 @@ cd client && npm run typecheck && npm run build
 
 | 部分 | 代码量 |
 | --- | --- |
-| 服务端 Rust（含 PostgreSQL / SQLite 双仓储） | ~28,200 行 |
-| Android Dart | ~28,000 行 |
+| 服务端 Rust（含 PostgreSQL / SQLite 双仓储 + 进程内嵌 FFI 入口） | ~28,300 行 |
+| Android Dart | ~28,200 行 |
 | Windows 客户端 Vue / TypeScript / Tauri | ~11,000 行 |
 | 数据库迁移 SQL（PostgreSQL + SQLite 两份） | ~890 行 |
-| 需求 / 架构 / API 文档 | ~8,400 行 |
+| 需求 / 架构 / API 文档 | ~8,500 行 |
 
 ## 路线图
 
-已完成 M1（认证、商品、采购入库、销售出库）、M2（盘点、低库存预警、看板、销售报表、审计）、M3（PostgreSQL 持久化主链路、导出、契约与运维闭环），以及单机版（SQLite 存储 + Tauri sidecar 单包分发）。
+已完成 M1（认证、商品、采购入库、销售出库）、M2（盘点、低库存预警、看板、销售报表、审计）、M3（PostgreSQL 持久化主链路、导出、契约与运维闭环）、Windows 单机版（SQLite + Tauri sidecar 单包分发），以及 Android 单机版（服务端编译为 `cdylib`，App 进程内启动）。
 
 后续计划：
 
-1. Android 端离线队列与冲突处理（`4091` / `4092` 重放语义对齐），以及 Refresh Token 自动续期。
-2. 双份迁移脚本（PostgreSQL / SQLite）一致性校验，避免两种形态出现语义漂移。
-3. 依赖版本锁定、环境变量清单与自动化压测基线（库存并发、离线重放、幂等冲突）。
-4. CI 自动发布接入（安装包与镜像产物）与生产部署、健康检查验收流程固化。
+1. Android APK 接入 CI 与 Release 发布；APK 体积优化（LTO、按形态裁剪 `redis` / `reqwest` 等仅 SaaS 需要的依赖）。
+2. Android 端离线队列与冲突处理（`4091` / `4092` 重放语义对齐），以及 Refresh Token 自动续期。
+3. 双份迁移脚本（PostgreSQL / SQLite）一致性校验，避免三种形态出现语义漂移。
+4. 依赖版本锁定、环境变量清单与自动化压测基线（库存并发、离线重放、幂等冲突）。
 
 ## 许可
 

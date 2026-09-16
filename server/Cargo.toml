@@ -3,6 +3,10 @@ name = "server"
 version = "0.1.0"
 edition = "2024"
 
+[lib]
+name = "jxc_server"
+crate-type = ["cdylib", "rlib"]
+
 [dependencies]
 axum = { version = "0.7", features = ["macros"] }
 chrono = { version = "0.4", features = ["serde", "clock"] }
@@ -25,3 +29,7 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
+
+# 发布产物去除符号表：桌面 sidecar 与 Android libjxc_server.so 都会显著变小。
+[profile.release]
+strip = true

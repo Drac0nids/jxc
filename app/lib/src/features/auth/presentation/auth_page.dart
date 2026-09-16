@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../../../config/env.dart';
 import '../../../core/widgets/brand_ui.dart';
 import '../../../storage/session_storage.dart';
 import '../application/session_controller.dart';
@@ -24,7 +25,9 @@ class _AuthPageState extends State<AuthPage> {
   bool _obscurePassword = true;
 
   final TextEditingController _tenantCodeController =
-      TextEditingController(text: 'DEMO01');
+      TextEditingController(
+        text: Env.isStandalone ? Env.standaloneTenantCode : 'DEMO01',
+      );
   final TextEditingController _tenantNameController = TextEditingController();
   final TextEditingController _usernameController =
       TextEditingController(text: 'admin');
@@ -35,7 +38,11 @@ class _AuthPageState extends State<AuthPage> {
   @override
   void initState() {
     super.initState();
-    // 尝试从本地读取上次登录的租户码，自动填写
+    // 单机版固定使用本地租户码；SaaS 形态沿用上次登录记住的租户码。
+    if (Env.isStandalone) {
+      _tenantCodeController.text = Env.standaloneTenantCode;
+      return;
+    }
     widget.sessionStorage.readTenantCode().then((code) {
       if (code != null && mounted) {
         _tenantCodeController.text = code;
@@ -96,24 +103,27 @@ class _AuthPageState extends State<AuthPage> {
                         child: Column(
                           crossAxisAlignment: CrossAxisAlignment.stretch,
                           children: <Widget>[
-                            SegmentedButton<bool>(
-                              segments: const <ButtonSegment<bool>>[
-                                ButtonSegment<bool>(
-                                    value: false, label: Text('登录')),
-                                ButtonSegment<bool>(
-                                    value: true, label: Text('注册')),
-                              ],
-                              selected: <bool>{_isRegisterMode},
-                              onSelectionChanged:
-                                  widget.sessionController.submitting
-                                      ? null
-                                      : (Set<bool> value) {
-                                          setState(() {
-                                            _isRegisterMode = value.first;
-                                          });
-                                          widget.sessionController.clearError();
-                                        },
-                            ),
+                            // 单机版只有本地租户，不提供注册入口。
+                            if (!Env.isStandalone)
+                              SegmentedButton<bool>(
+                                segments: const <ButtonSegment<bool>>[
+                                  ButtonSegment<bool>(
+                                      value: false, label: Text('登录')),
+                                  ButtonSegment<bool>(
+                                      value: true, label: Text('注册')),
+                                ],
+                                selected: <bool>{_isRegisterMode},
+                                onSelectionChanged:
+                                    widget.sessionController.submitting
+                                        ? null
+                                        : (Set<bool> value) {
+                                            setState(() {
+                                              _isRegisterMode = value.first;
+                                            });
+                                            widget.sessionController
+                                                .clearError();
+                                          },
+                              ),
                             const SizedBox(height: 16),
                             if (_isRegisterMode) ...<Widget>[
                               TextField(
@@ -203,7 +213,9 @@ class _AuthPageState extends State<AuthPage> {
                             if (!_isRegisterMode) ...<Widget>[
                               const SizedBox(height: 10),
                               Text(
-                                '演示账号：租户码 DEMO01 / admin / admin123',
+                                Env.isStandalone
+                                    ? '单机版：数据保存在本机，默认账号 admin / admin123'
+                                    : '演示账号：租户码 DEMO01 / admin / admin123',
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   color: colorScheme.onSurfaceVariant,
                                 ),
