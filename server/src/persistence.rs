@@ -94,7 +94,8 @@ pub async fn initialize_persistence(config: &AppConfig) -> Result<PersistenceHan
     Ok(handles)
 }
 
-async fn apply_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
+/// 执行 PostgreSQL 迁移；仓储回归测试复用同一入口，保证测试表结构与生产一致。
+pub(crate) async fn apply_postgres_migrations(pool: &PgPool) -> Result<(), AppError> {
     let migrations = [
         ("0001_init", include_str!("../migrations/0001_init.sql")),
         (
