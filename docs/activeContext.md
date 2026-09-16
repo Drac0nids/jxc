@@ -1,5 +1,45 @@
 # 当前工作焦点 (Active Context)
 
+## 2026-09-16（Android 单机版：服务端进程内嵌，端到端跑通）
+
+### 背景
+- 桌面单机版仍隐含"需要一台电脑"，而最小商户往往只有一台手机；本轮把单机形态延伸到 Android。
+- Android 10+ 禁止从应用数据目录执行二进制，无法照搬桌面 sidecar 做法，因此服务端改为 `cdylib` + FFI 在 App 进程内启动。
+
+### 本轮完成
+- 服务端结构
+  - `server/Cargo.toml`：新增 `[lib] name = "jxc_server"`、`crate-type = ["cdylib", "rlib"]`、`[profile.release] strip = true`。
+  - `server/src/lib.rs`（新增）：模块改为 `pub mod`，抽出 `serve()` 与 `ensure_sqlite_initialized()`，新增 FFI 入口 `jxc_start_server(data_dir)` / `jxc_server_port()`（端口 0 由系统分配、60s 超时、重复调用幂等）。
+  - `server/src/main.rs`：瘦身为薄壳，独立进程与桌面 sidecar 行为不变。
+- 客户端
+  - `app/lib/src/core/local_server.dart`（新增）：`dart:ffi` 加载 `libjxc_server.so`，拿到端口并生成本地 base URL；异常全部回退为 SaaS 配置。
+  - `app/lib/src/config/env.dart`：API 地址支持运行时覆盖，新增 `isStandalone` 与单机租户码 `local`。
+  - `app/lib/main.dart`：启动时拉起内嵌服务端并覆盖 API 地址。
+  - `auth_page.dart`：单机模式固定租户码 `local`、隐藏注册入口、提示文案改为单机口径。
+  - `pubspec.yaml`：新增 `ffi`、`path_provider`。
+- 构建与仓库
+  - `scripts/build-android-local.sh`（新增）：cargo-ndk 编 arm64/armv7 → `flutter build apk`。
+  - `.gitignore`：忽略 `app/android/app/src/main/jniLibs/`。
+  - `docs/screenshots/`：新增登录页、经营看板、功能页三张实机截图。
+  - `README.md`：升级为三种交付形态，补充 Android 单机版构建方式。
+- 文档先行
+  - `产品需求文档.md` 升级 `v1.8.0`，新增 `4.16 Android 单机版（进程内嵌服务端）`。
+  - `架构设计文档.md` 升级 `v1.6.0`，新增 `14. Android 单机版进程内嵌架构`。
+  - `API接口定义文档.md` 升级 `v1.8.0`，新增 `21. Android 单机版（进程内嵌）接口与鉴权兼容约定`。
+
+### 验证结果（模拟器 emulator-5554，Android 15 / arm64）
+- `cd server && cargo check --all-targets` ✅（无 error）
+- 交叉编译：`cargo ndk -t arm64-v8a` 成功；`.so` 17MB，开启 strip 后 12MB（armv7 8.7MB）
+- APK：`flutter build apk --release --target-platform android-arm64,android-arm` → 71MB，内含 `lib/arm64-v8a/libjxc_server.so`
+- 安装后 App 进程监听 `127.0.0.1:38423`；`GET /health` 返回 200；以 `local` 租户登录返回 JWT（role OWNER）
+- 业务写读：创建商品 → 读回 `total=1, stock=10`（SQLite 落盘）
+- UI 全链路：单机登录页（无注册入口、租户码预填 `local`）→ 登录 → 会话写入 `FlutterSharedPreferences.xml` → 看板正常渲染
+- 首次安装路径：`pm clear` 后重新启动仍可自动初始化并登录
+
+### 当前结论
+- 三种交付形态（SaaS / Windows 单机 / Android 单机）共用同一份领域逻辑与前端页面，接口契约零变更。
+- 后续待办：APK 接入 CI 与 Release、体积优化（LTO + 按形态裁剪 `redis` / `reqwest`）、单机模式下 Android 离线队列。
+
 ## 2026-09-16（单机版（本地模式）落地与开源基线补齐）
 
 ### 背景

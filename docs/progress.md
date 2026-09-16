@@ -1,5 +1,31 @@
 # 项目进度 (Progress)
 
+## 2026-09-16（Android 单机版：服务端进程内嵌）
+
+- [x] 完成文档先行更新（PRD / 架构 / API）
+  - `产品需求文档.md` 升级 `v1.8.0`，新增 `4.16 Android 单机版（进程内嵌服务端）`。
+  - `架构设计文档.md` 升级 `v1.6.0`，新增 `14. Android 单机版进程内嵌架构`（含为什么不能 exec sidecar、调用链、关键设计选择、构建管道）。
+  - `API接口定义文档.md` 升级 `v1.8.0`，新增 `21. Android 单机版（进程内嵌）接口与鉴权兼容约定`。
+- [x] 完成服务端双形态工程结构
+  - `server/Cargo.toml`：`[lib] name = "jxc_server"`、`crate-type = ["cdylib", "rlib"]`、`[profile.release] strip = true`。
+  - `server/src/lib.rs`（新增）：`serve()` / `ensure_sqlite_initialized()` / FFI 入口 `jxc_start_server`、`jxc_server_port`。
+  - `server/src/main.rs`：薄壳化，独立进程与桌面 sidecar 行为不变。
+- [x] 完成客户端进程内嵌接入
+  - `app/lib/src/core/local_server.dart`（新增）：`dart:ffi` 加载并启动内嵌服务端。
+  - `app/lib/src/config/env.dart`、`app/lib/main.dart`：运行时 API 地址覆盖与单机形态标记。
+  - `auth_page.dart`：单机模式固定租户码、隐藏注册入口、修正提示文案。
+- [x] 完成构建脚本与仓库治理
+  - `scripts/build-android-local.sh`（新增）：cargo-ndk + flutter build apk 一键打包。
+  - `.gitignore` 增加 `app/android/app/src/main/jniLibs/`。
+  - `docs/screenshots/` 新增三张实机截图，README 升级为三种交付形态。
+- [x] 完成验证（模拟器 Android 15 / arm64）
+  - `.so` 交叉编译成功（strip 后 arm64 12MB、armv7 8.7MB），APK 71MB 且内含 `.so`
+  - App 进程监听 `127.0.0.1:38423`；`/health` 200；`local` 租户登录返回 JWT
+  - 创建商品并读回成功（SQLite 落盘）；UI 登录 → 看板正常；`pm clear` 后首次安装路径验证通过
+
+**当前状态：**
+Android 单机版最小链路与业务读写已端到端跑通，三种交付形态共用同一份领域逻辑与前端页面；下一步接入 CI 发布 APK 并做体积优化。
+
 ## 2026-09-16（单机版（本地模式）落地与开源基线补齐）
 
 - [x] 完成文档先行更新（PRD / 架构 / API）
