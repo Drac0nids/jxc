@@ -24,10 +24,23 @@
 > 数据保存在本地（桌面端为 SQLite 文件，Android 端为应用私有目录，卸载即清理）。
 > **正式使用前请先修改默认密码。**
 
+### Windows 客户端
+
 <p align="center">
-  <img src="docs/screenshots/android-login.png" width="240" alt="Android 单机版登录页" />
-  <img src="docs/screenshots/android-dashboard.png" width="240" alt="经营看板" />
-  <img src="docs/screenshots/android-features.png" width="240" alt="功能总览" />
+  <img src="docs/screenshots/windows-dashboard.png" width="700" alt="Windows 客户端 · 经营看板" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/windows-products.png" width="470" alt="Windows 客户端 · 商品管理" />
+  <img src="docs/screenshots/windows-sales-report.png" width="470" alt="Windows 客户端 · 销售报表" />
+</p>
+
+### Android 单机版
+
+<p align="center">
+  <img src="docs/screenshots/android-login.png" width="220" alt="Android 单机版登录页" />
+  <img src="docs/screenshots/android-dashboard.png" width="220" alt="Android 经营看板" />
+  <img src="docs/screenshots/android-features.png" width="220" alt="Android 功能总览" />
 </p>
 
 ## 为什么值得一看

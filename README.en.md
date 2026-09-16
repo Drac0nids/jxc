@@ -27,6 +27,25 @@ Every artifact ships with a matching `.sha256` file. Older builds are under
 > On first launch the standalone build creates a local tenant (code `local`) and an admin account
 > `admin` / `admin123`. **Change the default password before real use.**
 
+### Windows client
+
+<p align="center">
+  <img src="docs/screenshots/windows-dashboard.png" width="700" alt="Windows client - dashboard" />
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/windows-products.png" width="470" alt="Windows client - products" />
+  <img src="docs/screenshots/windows-sales-report.png" width="470" alt="Windows client - sales report" />
+</p>
+
+### Android standalone
+
+<p align="center">
+  <img src="docs/screenshots/android-login.png" width="220" alt="Android standalone - login" />
+  <img src="docs/screenshots/android-dashboard.png" width="220" alt="Android - dashboard" />
+  <img src="docs/screenshots/android-features.png" width="220" alt="Android - feature overview" />
+</p>
+
 ## Why it is interesting
 
 **The Axum server is compiled into a `cdylib` and started inside the Android app process over FFI.**
