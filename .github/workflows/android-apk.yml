@@ -41,6 +41,8 @@ jobs:
       - name: Setup Flutter
         uses: subosito/flutter-action@v2
         with:
+          # 与本地开发/验证版本保持一致，避免 Flutter 新版移除 API 导致构建漂移
+          flutter-version: 3.41.4
           channel: stable
           cache: true
 
