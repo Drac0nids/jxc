@@ -180,12 +180,14 @@ STORAGE_BACKEND=sqlite SQLITE_PATH=jxc.db cargo run
 ## 质量与测试
 
 ```bash
-cd server && cargo test      # 服务端全量测试（当前基线 126 passed）与 Postgres 仓储层回归
+cd server && cargo test      # 服务端测试：123 passed
 cd app && flutter analyze    # Android 静态检查
 cd client && npm run typecheck && npm run build
 ```
 
-服务端测试覆盖业务主链路、幂等重放与冲突、版本冲突失败后不变性、盘点口径、报表口径与权限边界；`scripts/` 下提供部署与健康检查脚本用于发布验证。
+服务端测试覆盖业务主链路、幂等重放与冲突、版本冲突失败后不变性、盘点口径、报表口径与权限边界；其中 Postgres 仓储层回归需要先配置 `TEST_DATABASE_URL` 或 `DATABASE_URL`，未配置时自动跳过。`scripts/` 下提供部署与健康检查脚本用于发布验证。
+
+`.github/workflows/client-windows-installer.yml` 在 Windows runner 上构建 sidecar、NSIS 安装包与便携包（含 sha256），最近一次运行成功产出 NSIS（约 6MB）与便携包（约 19MB）。
 
 ## 文档基线
 
