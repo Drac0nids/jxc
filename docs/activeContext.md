@@ -1,5 +1,39 @@
 # 当前工作焦点 (Active Context)
 
+## 2026-09-16（单机版（本地模式）落地与开源基线补齐）
+
+### 背景
+- jxc 此前以多租户 SaaS 形态交付（服务端 + PostgreSQL + Redis + Windows/Android 客户端），对没有服务器与运维能力的个体商户门槛偏高。
+- 本轮落地“单机版（本地模式）”：同一套业务代码同时支撑 SaaS 与单机两种形态，单机版把服务端、SQLite 与客户端打包为单个桌面应用，安装即用。
+- 按仓库「文档先行」约束，先更新 PRD / 架构 / API 三份基线文档，再收口代码与仓库工程化问题。
+
+### 本轮完成
+- 服务端可插拔存储后端
+  - `server/src/config.rs`：`StorageBackend` 扩展 `Sqlite`，新增 `SQLITE_PATH`（默认 `jxc.db`）。
+  - `server/src/persistence.rs`：SQLite 连接池初始化 + `migrations/sqlite/*.sql` 内嵌迁移。
+  - `server/src/repository_sqlite.rs`：SQLite 仓储实现（商品 / 批次 / 分类 / 供应商 / 流水码 / 采购 / 销售 / 盘点 / 报表 / 审计 / 用户）。
+  - `server/src/repository.rs` 与路由层：统一改为传递持久化句柄，路由不再直接依赖 `PgPool`。
+  - `server/src/main.rs`：单机模式首次启动自动初始化租户（`local`）与管理员账号。
+- 客户端单机打包
+  - `client/src-tauri/tauri.conf.json`：`externalBin = ["binaries/server"]`；`capabilities/default.json` 增加 `shell:default`。
+  - `scripts/build-local.sh`：一键完成 sidecar 编译 + 前端构建 + `tauri build`。
+  - 新增页面：供应商、分类、批次、效期批次、流水码、入库记录、盘点流水、经营趋势。
+- 仓库工程化
+  - `.gitignore` 补充 sidecar 产物与 SQLite 数据文件（避免 44MB 二进制入库）。
+  - 修复测试目标编译失败（`Product::track_serials`、`AppConfig::sqlite_path` 缺失字段）。
+  - 修复 `user_management_create_user_with_duplicate_username_returns_4090` 用例夹具：创建第二个 `OWNER` 会被角色层级规则拦截，改用 `SALES` 角色以真正覆盖“用户名重复”路径。
+  - 新增根 `README.md` 与 `LICENSE`（Apache-2.0）。
+
+### 验证结果
+- `cd server && cargo check --all-targets` ✅（无 error）
+- `cd server && cargo test` ✅（`123 passed; 0 failed`）
+- `npm run typecheck --prefix client` ✅
+- 单机版产物：`client/src-tauri/target/<target>/release/bundle/`（NSIS / macos / dmg）
+
+### 当前结论
+- 单机版与 SaaS 版共用同一份领域逻辑与前端页面，差异仅在存储实现与进程编排；未设置 `STORAGE_BACKEND` 时默认仍为 `postgres`，既有部署行为不变。
+- 后续待办：Android 端离线队列与冲突处理、CI 自动发布接入、双份迁移脚本一致性校验。
+
 ## 2026-03-13（前端审美升级 v1.2.31：视觉系统与交互动效收尾）
 
 ### 背景

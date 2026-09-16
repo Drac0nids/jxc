@@ -1,5 +1,36 @@
 # 项目进度 (Progress)
 
+## 2026-09-16（单机版（本地模式）落地与开源基线补齐）
+
+- [x] 完成文档先行更新（PRD / 架构 / API）
+  - `产品需求文档.md` 升级 `v1.7.0`，新增 `4.15 单机版（本地模式）交付形态`（形态对比、范围、验收标准、兼容策略）。
+  - `架构设计文档.md` 升级 `v1.5.0`，新增 `13. 单机版（本地模式）分发架构`（存储抽象、单机引导、sidecar 分发、构建产物、边界）。
+  - `API接口定义文档.md` 升级 `v1.7.0`，新增 `20. 单机版（本地模式）接口与鉴权兼容约定`。
+- [x] 完成服务端双存储后端
+  - `server/src/config.rs`：`StorageBackend` 增加 `Sqlite`，新增 `SQLITE_PATH`。
+  - `server/src/persistence.rs`：SQLite 连接池与内嵌迁移应用。
+  - `server/src/repository_sqlite.rs`：SQLite 仓储实现（新增）。
+  - `server/migrations/sqlite/*.sql`：与 PostgreSQL 版一一对应的迁移脚本（新增）。
+  - `server/src/repository.rs` 及路由层：统一持久化句柄，去除路由对 `PgPool` 的直接依赖。
+  - `server/src/main.rs`：单机模式租户与管理员自动初始化。
+- [x] 完成客户端单机打包接线
+  - `client/src-tauri/tauri.conf.json`：`externalBin` 指向 sidecar；窗口尺寸与产品名调整。
+  - `client/src-tauri/Cargo.toml` + `capabilities/default.json`：接入 `tauri-plugin-shell` 与 `shell:default`。
+  - `scripts/build-local.sh`：编译 sidecar 并完成前端与桌面打包。
+  - 新增页面：`SuppliersPage`、`CategoriesPage`、`BatchesPage`、`ExpiringBatchesPage`、`SerialsPage`、`InboundLogsPage`、`StockCheckLogsPage`、`TrendPage`。
+- [x] 完成仓库工程化修复
+  - `.gitignore`：忽略 sidecar 二进制产物与 SQLite 数据文件。
+  - 修复测试目标编译失败（`track_serials`、`sqlite_path` 缺失字段）。
+  - 修复重复用户名用例夹具（改用 `SALES` 角色，避免被 OWNER 唯一性规则抢先拦截）。
+  - 新增根 `README.md`（项目说明、双形态、快速开始、工程约束、路线图）与 `LICENSE`（Apache-2.0）。
+- [x] 完成验证
+  - `cargo check --all-targets` ✅（无 error）
+  - `cargo test` ✅（`123 passed; 0 failed`）
+  - `npm run typecheck --prefix client` ✅
+
+**当前状态：**
+单机版（本地模式）已完成文档、服务端双存储后端、客户端打包与仓库工程化收口，服务端测试全绿；SaaS 形态默认行为不变，两种形态共用同一份领域逻辑与前端页面。
+
 ## 2026-03-13（前端审美升级 v1.2.31：视觉系统与交互动效收尾）
 
 - [x] 完成文档先行约束执行
